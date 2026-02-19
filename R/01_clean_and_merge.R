@@ -262,9 +262,32 @@ states_all <- bind_rows(ak_combine, mass_combine, maine_combine)
 # Final combined dataframe
 states_and_cities <- bind_rows(states_all, cities_all2)
 
+# --- Merge in recent_lpw from statewide elections data ---
+# A locale has recent_lpw = TRUE if its state had a statewide race (Gov/Senator)
+# won with < 40% of the vote within 10 years of the RCV ballot measure.
+swe <- read.csv("data/raw/statewide_elections_lpw_2006_2018.csv") %>%
+  rename(state = X...State, winner_share = Winner.Share....)
+
+# States with any winner share < 40%
+lpw_states <- swe %>%
+  filter(winner_share < 40) %>%
+  pull(state) %>%
+  unique()
+
+# Map each place to its state for the join
+place_to_state <- c(
+  "Alaska" = "Alaska", "Massachusetts" = "Massachusetts", "Maine" = "Maine",
+  "Albany" = "California", "Bloomington" = "Minnesota", "Boulder" = "Colorado",
+  "Eureka" = "California", "Minnetonka" = "Minnesota"
+)
+
+states_and_cities <- states_and_cities %>%
+  mutate(recent_lpw = place_to_state[place] %in% lpw_states)
+
 cat("states_and_cities created:", nrow(states_and_cities), "rows\n")
 cat("Columns:", paste(names(states_and_cities), collapse = ", "), "\n")
 cat("Places:", paste(unique(states_and_cities$place), collapse = ", "), "\n")
+cat("recent_lpw TRUE for:", paste(unique(states_and_cities$place[states_and_cities$recent_lpw]), collapse = ", "), "\n")
 
 # Save clean dataset
 save(states_and_cities, file = "data/rcv_data.RData")
