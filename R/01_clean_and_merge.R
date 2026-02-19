@@ -19,7 +19,7 @@ library(stringr)
 # Source: https://www.elections.alaska.gov/results/prior-results/
 # ============================================================================
 
-ak_results <- read.csv("data/raw/resultsbyprecinct_alaska.txt", header = FALSE)
+ak_results <- read.csv("data/raw/alaska_all_results_2020.txt", header = FALSE)
 names(ak_results) <- c("district", "race", "V3", "V4", "choice", "party", "V7", "votes", "V9")
 
 ak_results <- ak_results %>%
@@ -57,8 +57,8 @@ ak_combine <- ak_merged %>%
 # Source: https://electionstats.state.ma.us/
 # ============================================================================
 
-mass_rcv <- read.csv("data/raw/mass_measure_precincts.csv")
-mass_pres <- read.csv("data/raw/mass_president_precincts.csv")
+mass_rcv <- read.csv("data/raw/massachusetts_rcv_2020.csv")
+mass_pres <- read.csv("data/raw/massachusetts_pres_2020.csv")
 
 mass_pres <- mass_pres %>%
   filter(!is.na(No.Preference), City.Town != "TOTALS") %>%
@@ -92,8 +92,8 @@ mass_combine <- mass_votes %>%
 # Source (RCV): Maine Secretary of State, https://www.maine.gov/sos/cec/elec/results/
 # ============================================================================
 
-maine_pres <- read.csv("data/raw/maine_president_2016.csv")
-maine_ref <- read.csv("data/raw/maine_referendum16.csv")
+maine_pres <- read.csv("data/raw/maine_pres_2016.csv")
+maine_ref <- read.csv("data/raw/maine_rcv_2016.csv")
 
 maine_ref <- maine_ref %>%
   filter(X != "", X != "CTY") %>%
@@ -120,7 +120,7 @@ maine_combine <- maine_2016 %>%
 # Source: https://www.acvote.org/election-information/elections?id=241#
 # ============================================================================
 
-albany <- read.csv("data/raw/albany_precincts.csv")
+albany <- read.csv("data/raw/albany_all_results_2020.csv")
 
 albany <- albany %>% rename(Precinct_name = X...Precinct_name)
 
@@ -150,13 +150,13 @@ albany_both <- left_join(albany_measure, albany_pres, by = "Precinct_name") %>%
 # Source (Pres): https://www.sos.state.mn.us/elections-voting/election-results/2020/2020-general-election-results/2020-precinct-results-spreadsheet/
 # ============================================================================
 
-bloomington_measure <- read.csv("data/raw/bloomington_rcv.csv") %>%
+bloomington_measure <- read.csv("data/raw/bloomington_rcv_2020.csv") %>%
   rename(precinct = X...County..Precinct) %>%
   filter(precinct != "Candidate Totals:")
 bloomington_measure <- bloomington_measure %>%
   mutate(precinct = gsub("Hennepin: ", "", precinct))
 
-mn_pres <- read.csv("data/raw/mn_pres.csv") %>%
+mn_pres <- read.csv("data/raw/minnesota_pres_2020.csv") %>%
   rename(precinct = PCTNAME, VTDID = X...VTDID)
 
 bloomington_both <- left_join(bloomington_measure, mn_pres, by = "precinct") %>%
@@ -173,7 +173,7 @@ bloomington_both <- bloomington_both %>%
 # Source: https://assets.bouldercounty.org/wp-content/uploads/2020/11/2020-Boulder-County-General-Election-Official-Statement-of-Votes.xlsx
 # ============================================================================
 
-boulder <- read.csv("data/raw/boulder_rcv_pres.csv") %>%
+boulder <- read.csv("data/raw/boulder_all_results_2020.csv") %>%
   rename(Precinct.Name.Short = X...Precinct.Name..Short.)
 
 boulder_rcv <- boulder %>%
@@ -203,14 +203,14 @@ boulder_both <- left_join(boulder_rcv, boulder_pres, by = "precinct") %>%
 # Source (Pres): https://statewidedatabase.org/d10/g20.html
 # ============================================================================
 
-eureka_measure <- read.csv("data/raw/eureka_rcv.csv") %>%
+eureka_measure <- read.csv("data/raw/eureka_rcv_2020.csv") %>%
   rename(Precinct = X...Precinct) %>%
   filter(Precinct != "Totals") %>%
   select(precinct = Precinct, Yes, No, Total.Ballots.Cast) %>%
   mutate(across(c(2:4), parse_number)) %>%
   mutate(yes_share = Yes / Total.Ballots.Cast)
 
-eureka_pres <- read.csv("data/raw/humboldt_pres.csv")
+eureka_pres <- read.csv("data/raw/humboldt_pres_2020.csv")
 eureka_pres <- eureka_pres %>%
   select(svprec, total_votes = TOTVOTE, biden = PRSDEM01, trump = PRSREP01) %>%
   mutate(precinct = gsub("_A", "", svprec)) %>%
@@ -230,7 +230,7 @@ eureka_both <- left_join(eureka_measure, eureka_pres, by = "precinct") %>%
 # Source (Pres): https://www.sos.state.mn.us/elections-voting/election-results/2020/2020-general-election-results/2020-precinct-results-spreadsheet/
 # ============================================================================
 
-minnetonka_measure <- read.csv("data/raw/minnetonka_rcv.csv") %>%
+minnetonka_measure <- read.csv("data/raw/minnetonka_rcv_2020.csv") %>%
   rename(precinct = X...County..Precinct) %>%
   filter(precinct != "Candidate Totals:") %>%
   mutate(precinct = gsub("Hennepin: ", "", precinct))
