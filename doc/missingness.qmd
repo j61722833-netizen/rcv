@@ -1,0 +1,250 @@
+---
+title: "RCV Data Missingness Audit"
+format: html
+---
+
+```{r setup, message=FALSE}
+library(dplyr)
+library(tidyr)
+library(readr)
+```
+
+## Overview
+
+This document audits how many rows are dropped or have missing values at each stage of the cleaning pipeline. The goal is to identify where data is lost.
+
+## Alaska 2020
+
+```{r alaska}
+ak_results <- read.csv("../data/raw/alaska_all_results_2020.txt", header = FALSE)
+names(ak_results) <- c("district", "race", "V3", "V4", "choice", "party", "V7", "votes", "V9")
+
+ak_results <- ak_results %>%
+  select(district, race, choice, party, votes) %>%
+  filter(!choice %in% c("Number of Precincts for Race",
+                         "Number of Precincts Reporting", "Registered Voters",
+                         "Times Counted"))
+
+ak_pres <- ak_results %>% filter(race == "U.S. President / Vice President") %>%
+  select(district, race, party, votes) %>%
+  pivot_wider(names_from = party, values_from = votes)
+
+ak_m2 <- ak_results %>% filter(race == "Ballot Measure No. 2 - 19AKBE") %>%
+  pivot_wider(names_from = choice, values_from = votes) %>%
+  select(district, race, YES, NO)
+
+cat("Pres precincts:", nrow(ak_pres), "\n")
+cat("Ballot measure precincts:", nrow(ak_m2), "\n")
+
+# right_join keeps all pres, drops m2-only
+ak_merged <- right_join(ak_m2, ak_pres, by = "district")
+cat("After right_join:", nrow(ak_merged), "\n")
+
+# What's lost?
+cat("M2 precincts not in pres:", sum(!ak_m2$district %in% ak_pres$district), "\n")
+cat("Pres precincts not in M2:", sum(!ak_pres$district %in% ak_m2$district), "\n")
+
+ak_merged <- ak_merged %>%
+  select(-race.x, -race.y) %>%
+  mutate(yes_share = YES / (YES + NO),
+         biden_share = DEM / (DEM + CON + ALI + GRN + LIB + NOM + REP))
+
+cat("NaN in yes_share:", sum(is.nan(ak_merged$yes_share)), "\n")
+cat("NaN in biden_share:", sum(is.nan(ak_merged$biden_share)), "\n")
+cat("NA in yes_share:", sum(is.na(ak_merged$yes_share)), "\n")
+cat("NA in biden_share:", sum(is.na(ak_merged$biden_share)), "\n")
+```
+
+## Massachusetts 2020
+
+```{r massachusetts}
+mass_rcv <- read.csv("../data/raw/massachusetts_rcv_2020.csv")
+mass_pres <- read.csv("../data/raw/massachusetts_pres_2020.csv")
+
+mass_pres <- mass_pres %>%
+  filter(!is.na(No.Preference), City.Town != "TOTALS") %>%
+  rename(Locality = City.Town) %>%
+  mutate(precinct = paste(Locality, Ward, Pct, sep = "_")) %>%
+  rename(biden = Joseph.R..Biden..Jr., total = Total.Votes.Cast) %>%
+  mutate(biden = parse_number(biden), total = parse_number(total)) %>%
+  mutate(biden_share = biden / total)
+
+mass_rcv <- mass_rcv %>%
+  filter(Locality != "TOTALS") %>%
+  mutate(precinct = paste(Locality, Ward, Pct, sep = "_")) %>%
+  mutate(Yes = parse_number(Yes), total = parse_number(Total.Votes.Cast)) %>%
+  mutate(yes_share = Yes / total)
+
+cat("Pres precincts:", n_distinct(mass_pres$precinct), "\n")
+cat("RCV precincts:", n_distinct(mass_rcv$precinct), "\n")
+
+# What does inner_join lose?
+inner <- inner_join(mass_pres, mass_rcv, by = "precinct")
+full <- full_join(mass_pres, mass_rcv, by = "precinct")
+cat("inner_join rows:", nrow(inner), "\n")
+cat("full_join rows:", nrow(full), "\n")
+cat("Rows DROPPED by inner_join:", nrow(full) - nrow(inner), "\n")
+
+pres_only <- anti_join(mass_pres, mass_rcv, by = "precinct")
+rcv_only <- anti_join(mass_rcv, mass_pres, by = "precinct")
+cat("Precincts in pres only:", nrow(pres_only), "\n")
+cat("Precincts in RCV only:", nrow(rcv_only), "\n")
+
+if (nrow(pres_only) > 0) {
+  cat("Sample pres-only precincts:\n")
+  print(head(pres_only$precinct, 10))
+}
+if (nrow(rcv_only) > 0) {
+  cat("Sample RCV-only precincts:\n")
+  print(head(rcv_only$precinct, 10))
+}
+```
+
+## Maine 2016
+
+```{r maine}
+maine_pres <- read.csv("../data/raw/maine_pres_2016.csv")
+maine_ref <- read.csv("../data/raw/maine_rcv_2016.csv")
+
+maine_ref <- maine_ref %>%
+  filter(X != "", X != "CTY") %>%
+  select(county = X, dist = X.1, rcv_yes = Question.5..Citizen.Initiative,
+         rcv_no = X.10, rcv_blank = X.11) %>%
+  filter(dist != "MUNICIPALITY") %>%
+  mutate(across(rcv_yes:rcv_blank, parse_number)) %>%
+  mutate(rcv_share = rcv_yes / (rcv_yes + rcv_no + rcv_blank))
+
+maine_pres <- maine_pres %>%
+  filter(X != "", X != "CTY") %>%
+  select(county = X..., dist = X, clinton = Clinton..Hillary.R., total = TBC) %>%
+  filter(dist != "Town") %>%
+  mutate(across(clinton:total, parse_number)) %>%
+  mutate(clinton_share = clinton / total)
+
+cat("Pres districts:", n_distinct(maine_pres$dist), "\n")
+cat("Ref districts:", n_distinct(maine_ref$dist), "\n")
+
+maine_full <- full_join(maine_pres, maine_ref, by = "dist")
+
+pres_only <- anti_join(maine_pres, maine_ref, by = "dist")
+ref_only <- anti_join(maine_ref, maine_pres, by = "dist")
+cat("Districts in pres only:", nrow(pres_only), "\n")
+cat("Districts in ref only:", nrow(ref_only), "\n")
+
+cat("Total rows after full_join:", nrow(maine_full), "\n")
+cat("NA in clinton_share:", sum(is.na(maine_full$clinton_share)), "\n")
+cat("NA in rcv_share:", sum(is.na(maine_full$rcv_share)), "\n")
+
+if (nrow(pres_only) > 0) {
+  cat("\nSample pres-only districts:\n")
+  print(head(pres_only$dist, 10))
+}
+if (nrow(ref_only) > 0) {
+  cat("\nSample ref-only districts:\n")
+  print(head(ref_only$dist, 10))
+}
+```
+
+## Eureka, CA
+
+```{r eureka}
+eureka_measure <- read.csv("../data/raw/eureka_rcv_2020.csv") %>%
+  rename(Precinct = X...Precinct) %>%
+  filter(Precinct != "Totals") %>%
+  select(precinct = Precinct, Yes, No, Total.Ballots.Cast) %>%
+  mutate(across(c(2:4), parse_number)) %>%
+  mutate(yes_share = Yes / Total.Ballots.Cast)
+
+eureka_pres <- read.csv("../data/raw/humboldt_pres_2020.csv") %>%
+  select(svprec, total_votes = TOTVOTE, biden = PRSDEM01, trump = PRSREP01) %>%
+  mutate(precinct = gsub("_A", "", svprec)) %>%
+  group_by(precinct) %>%
+  summarize(across(c(2:4), sum))
+
+cat("RCV precincts:", nrow(eureka_measure), "\n")
+cat("Pres precincts:", nrow(eureka_pres), "\n")
+
+eureka_both <- left_join(eureka_measure, eureka_pres, by = "precinct")
+cat("After left_join:", nrow(eureka_both), "\n")
+cat("NaN in yes_share:", sum(is.nan(eureka_both$yes_share)), "\n")
+cat("NA in yes_share:", sum(is.na(eureka_both$yes_share)), "\n")
+
+# What rows would the NaN filter drop?
+nan_rows <- eureka_both %>% filter(is.nan(yes_share))
+cat("Rows with NaN yes_share (currently dropped by filter):\n")
+print(nan_rows)
+```
+
+## Cities: Bloomington, Boulder, Albany, Minnetonka
+
+```{r other-cities}
+# These use left_join which keeps all LHS rows — just check for NAs
+mn_pres <- read.csv("../data/raw/minnesota_pres_2020.csv") %>%
+  rename(precinct = PCTNAME, VTDID = X...VTDID)
+
+bloomington_measure <- read.csv("../data/raw/bloomington_rcv_2020.csv") %>%
+  rename(precinct = X...County..Precinct) %>%
+  filter(precinct != "Candidate Totals:") %>%
+  mutate(precinct = gsub("Hennepin: ", "", precinct))
+bloomington_both <- left_join(bloomington_measure, mn_pres, by = "precinct")
+cat("Bloomington: RCV precincts:", nrow(bloomington_measure),
+    "| After join:", nrow(bloomington_both),
+    "| Unmatched:", sum(is.na(bloomington_both$TOTVOTING)), "\n")
+
+minnetonka_measure <- read.csv("../data/raw/minnetonka_rcv_2020.csv") %>%
+  rename(precinct = X...County..Precinct) %>%
+  filter(precinct != "Candidate Totals:") %>%
+  mutate(precinct = gsub("Hennepin: ", "", precinct))
+minnetonka_both <- left_join(minnetonka_measure, mn_pres, by = "precinct")
+cat("Minnetonka: RCV precincts:", nrow(minnetonka_measure),
+    "| After join:", nrow(minnetonka_both),
+    "| Unmatched:", sum(is.na(minnetonka_both$TOTVOTING)), "\n")
+
+albany <- read.csv("../data/raw/albany_all_results_2020.csv") %>%
+  rename(Precinct_name = X...Precinct_name)
+albany_m <- albany %>% filter(Contest_title == "Measure BB - City of Albany") %>%
+  select(Precinct_name) %>% distinct()
+albany_p <- albany %>% filter(Contest_title == "President and Vice President") %>%
+  select(Precinct_name) %>% distinct()
+cat("Albany: Measure precincts:", nrow(albany_m),
+    "| Pres precincts:", nrow(albany_p),
+    "| Unmatched:", sum(!albany_m$Precinct_name %in% albany_p$Precinct_name), "\n")
+
+boulder <- read.csv("../data/raw/boulder_all_results_2020.csv") %>%
+  rename(Precinct.Name.Short = X...Precinct.Name..Short.)
+boulder_r <- boulder %>% filter(Contest.Name == "City of Boulder Ballot Question 2E") %>%
+  select(Precinct.Name) %>% distinct()
+boulder_p <- boulder %>% filter(Contest.Name == "Presidential Electors") %>%
+  select(Precinct.Name) %>% distinct()
+cat("Boulder: RCV precincts:", nrow(boulder_r),
+    "| Pres precincts:", nrow(boulder_p),
+    "| Unmatched:", sum(!boulder_r$Precinct.Name %in% boulder_p$Precinct.Name), "\n")
+```
+
+## Summary: Final Dataset
+
+```{r summary}
+load("../data/rcv_data.RData")
+
+cat("Total rows:", nrow(states_and_cities), "\n\n")
+
+cat("NAs per column:\n")
+print(colSums(is.na(states_and_cities)))
+
+cat("\nNAs by place:\n")
+states_and_cities %>%
+  group_by(place) %>%
+  summarize(
+    n = n(),
+    na_precinct_id = sum(is.na(precinct_id)),
+    na_dem_share = sum(is.na(dem_share)),
+    na_yes_share = sum(is.na(yes_share)),
+    .groups = "drop"
+  ) %>%
+  print(n = 10)
+
+cat("\nAll rows with any NA:\n")
+states_and_cities %>%
+  filter(if_any(everything(), is.na)) %>%
+  print(n = 30)
+```

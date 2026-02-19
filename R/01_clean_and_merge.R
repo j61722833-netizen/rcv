@@ -48,8 +48,7 @@ ak_merged <- ak_merged %>%
          biden_share = DEM / (DEM + CON + ALI + GRN + LIB + NOM + REP))
 
 ak_combine <- ak_merged %>%
-  # REMOVED: PRECINCT ID (district)
-  select(dem_share = biden_share, yes_share) %>%
+  rename(precinct_id = district, dem_share = biden_share) %>%
   mutate(place = "Alaska")
 
 # ============================================================================
@@ -82,8 +81,7 @@ mass_rcv <- mass_rcv %>%
 mass_votes <- inner_join(mass_pres, mass_rcv, by = "precinct")
 
 mass_combine <- mass_votes %>%
-  # REMOVED: PRECINCT ID (precinct)
-  select(dem_share = biden_share, yes_share) %>%
+  rename(precinct_id = precinct, dem_share = biden_share) %>%
   mutate(place = "Massachusetts")
 
 # ============================================================================
@@ -99,20 +97,21 @@ maine_ref <- maine_ref %>%
   filter(X != "", X != "CTY") %>%
   select(county = X, dist = X.1, rcv_yes = Question.5..Citizen.Initiative,
          rcv_no = X.10, rcv_blank = X.11) %>%
+  filter(dist != "MUNICIPALITY") %>%
   mutate(across(rcv_yes:rcv_blank, parse_number)) %>%
   mutate(rcv_share = rcv_yes / (rcv_yes + rcv_no + rcv_blank))
 
 maine_pres <- maine_pres %>%
   filter(X != "", X != "CTY") %>%
   select(county = X..., dist = X, clinton = Clinton..Hillary.R., total = TBC) %>%
+  filter(dist != "Town") %>%
   mutate(across(clinton:total, parse_number)) %>%
   mutate(clinton_share = clinton / total)
 
 maine_2016 <- full_join(maine_pres, maine_ref, by = "dist")
 
 maine_combine <- maine_2016 %>%
-  # REMOVED: PRECINCT ID (dist)
-  select(dem_share = clinton_share, yes_share = rcv_share) %>%
+  rename(precinct_id = dist, dem_share = clinton_share, yes_share = rcv_share) %>%
   mutate(place = "Maine")
 
 # ============================================================================
@@ -140,8 +139,7 @@ albany_pres <- albany %>%
   mutate(biden_share = biden / total_ballots)
 
 albany_both <- left_join(albany_measure, albany_pres, by = "Precinct_name") %>%
-  # REMOVED: PRECINCT ID (Precinct_name) — kept temporarily for join, dropped below
-  select(biden_share, yes_share) %>%
+  rename(precinct_id = Precinct_name, biden_share = biden_share) %>%
   mutate(city = "Albany")
 
 # ============================================================================
@@ -164,8 +162,7 @@ bloomington_both <- left_join(bloomington_measure, mn_pres, by = "precinct") %>%
 bloomington_both <- bloomington_both %>%
   mutate(across(c(2:3), parse_number)) %>%
   mutate(yes_share = YES / TOTVOTING, biden_share = USPRSDFL / TOTVOTING) %>%
-  # REMOVED: PRECINCT ID (precinct)
-  select(biden_share, yes_share) %>%
+  rename(precinct_id = precinct) %>%
   mutate(city = "Bloomington")
 
 # ============================================================================
@@ -193,8 +190,7 @@ boulder_pres <- boulder_pres %>%
   mutate(biden_share = parse_number(biden) / parse_number(Total.Ballots))
 
 boulder_both <- left_join(boulder_rcv, boulder_pres, by = "precinct") %>%
-  # REMOVED: PRECINCT ID (precinct)
-  select(biden_share, yes_share) %>%
+  rename(precinct_id = precinct) %>%
   mutate(city = "Boulder")
 
 # ============================================================================
@@ -218,10 +214,8 @@ eureka_pres <- eureka_pres %>%
   summarize(across(c(2:4), sum))
 
 eureka_both <- left_join(eureka_measure, eureka_pres, by = "precinct") %>%
-  filter(yes_share != is.nan(yes_share)) %>%
   mutate(biden_share = biden / total_votes) %>%
-  # REMOVED: PRECINCT ID (precinct)
-  select(biden_share, yes_share) %>%
+  rename(precinct_id = precinct) %>%
   mutate(city = "Eureka")
 
 # ============================================================================
@@ -239,28 +233,52 @@ minnetonka_both <- left_join(minnetonka_measure, mn_pres, by = "precinct") %>%
   select(precinct, YES, NO, USPRSDFL, USPRSTOTAL, TOTVOTING) %>%
   mutate(across(c(2:3), parse_number)) %>%
   mutate(yes_share = YES / TOTVOTING, biden_share = USPRSDFL / TOTVOTING) %>%
-  # REMOVED: PRECINCT ID (precinct)
-  select(biden_share, yes_share) %>%
+  rename(precinct_id = precinct) %>%
   mutate(city = "Minnetonka")
 
 # ============================================================================
 # --- COMBINE ALL ---
 # ============================================================================
 
-# Combine the 5 cities
-cities_all <- list(albany_both, bloomington_both, boulder_both, eureka_both, minnetonka_both) %>%
-  map(select, "biden_share", "yes_share", "city") %>%
-  bind_rows()
+# Standardize each locale to shared columns: precinct_id, dem_share, yes_share, place
+# Plus any additional raw columns each locale carries
+standardize <- function(df, place_col = "place") {
+  df %>% mutate(precinct_id = as.character(precinct_id))
+}
 
-cities_all2 <- cities_all %>%
-  # REMOVED: CITY-SPECIFIC COLUMN (city renamed to place)
-  select(dem_share = biden_share, yes_share, place = city)
+ak_combine <- standardize(ak_combine)
+mass_combine <- standardize(mass_combine)
+maine_combine <- standardize(maine_combine)
+albany_both <- standardize(albany_both)
+bloomington_both <- standardize(bloomington_both)
+boulder_both <- standardize(boulder_both)
+eureka_both <- standardize(eureka_both)
+minnetonka_both <- standardize(minnetonka_both)
+
+# Select shared columns from each locale, keeping locale-specific extras in separate list
+# Shared: precinct_id, dem_share, yes_share, place
+select_shared <- function(df) {
+  df %>% select(precinct_id, dem_share, yes_share, place)
+}
+
+# Combine the 5 cities
+cities_all <- list(
+  select_shared(albany_both %>% rename(dem_share = biden_share, place = city)),
+  select_shared(bloomington_both %>% rename(dem_share = biden_share, place = city)),
+  select_shared(boulder_both %>% rename(dem_share = biden_share, place = city)),
+  select_shared(eureka_both %>% rename(dem_share = biden_share, place = city)),
+  select_shared(minnetonka_both %>% rename(dem_share = biden_share, place = city))
+) %>% bind_rows()
 
 # Combine the 3 states
-states_all <- bind_rows(ak_combine, mass_combine, maine_combine)
+states_all <- list(
+  select_shared(ak_combine),
+  select_shared(mass_combine),
+  select_shared(maine_combine)
+) %>% bind_rows()
 
 # Final combined dataframe
-states_and_cities <- bind_rows(states_all, cities_all2)
+states_and_cities <- bind_rows(states_all, cities_all)
 
 # --- Merge in recent_lpw from statewide elections data ---
 # A locale has recent_lpw = TRUE if its state had a statewide race (Gov/Senator)
