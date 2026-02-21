@@ -51,3 +51,34 @@ states_and_cities %>%
   theme_bw(base_size = 12) +
   theme(legend.position = "right")
 ```
+
+```{r}
+#| fig-width: 9
+#| fig-height: 6
+
+lpw_colors <- c("TRUE" = "#D73027", "FALSE" = "#4575B4")
+
+states_and_cities %>%
+  filter(!is.na(yes_share), !is.na(dem_share)) %>%
+  mutate(recent_lpw = as.character(recent_lpw)) %>%
+  ggplot(aes(x = dem_share, y = yes_share,
+             color = recent_lpw, shape = locale)) +
+  geom_point(size = 1.8, alpha = 0.65) +
+  geom_smooth(aes(group = recent_lpw), method = "lm", se = FALSE,
+              linewidth = 0.9) +
+  scale_color_manual(values = lpw_colors,
+                     labels = c("TRUE" = "Yes", "FALSE" = "No")) +
+  scale_shape_manual(values = c(Alaska = 16, Maine = 17, Massachusetts = 15,
+                                Albany = 1, Bloomington = 2, Boulder = 0,
+                                Eureka = 5, Minnetonka = 6)) +
+  scale_x_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
+  labs(
+    x     = "Democratic Presidential Vote Share",
+    y     = "RCV Ballot Measure Yes Vote Share",
+    color = "Recent low-plurality winner",
+    shape = "Locale"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right")
+```
