@@ -139,7 +139,10 @@ mass_rcv <- mass_rcv %>%
     # use gsub + as.numeric to handle both character and already-numeric inputs.
     across(c(rcv_yes, rcv_no, rcv_blank, rcv_total),
            ~as.numeric(gsub(",", "", as.character(.x)))),
-    yes_share = rcv_yes / rcv_total
+    # Use contested votes (YES + NO) as denominator for consistency with all
+    # other locales. rcv_total (Total.Votes.Cast) includes blanks which would
+    # deflate yes_share relative to locales that exclude blanks.
+    yes_share = rcv_yes / (rcv_yes + rcv_no)
   )
 
 # Join pres and RCV on the constructed precinct string.
@@ -191,6 +194,18 @@ mass_combine <- inner_join(mass_pres, mass_rcv, by = "precinct") %>%
 
 maine_pres <- read.csv("data/raw/maine_pres_2016.csv")
 maine_ref  <- read.csv("data/raw/maine_rcv_2016.csv")
+
+# Guard: verify the auto-generated column names match expectation. Both files
+# have a UTF-8 BOM that shifts names (col 1 becomes "X..." instead of "X").
+# If the BOM is absent or the file layout changes, column mappings silently land
+# on wrong data. These assertions convert that failure mode into a clear error.
+stopifnot(
+  "maine_pres col 1 must be 'X...' (BOM expected)" = names(maine_pres)[1] == "X...",
+  "maine_pres col 2 must be 'X' (municipality name)" = names(maine_pres)[2] == "X",
+  "maine_ref col 1 must be 'X...' (BOM expected)"  = names(maine_ref)[1]  == "X...",
+  "maine_ref col 3 must be 'X.1' (municipality name)" = names(maine_ref)[3] == "X.1",
+  "maine_ref Q5 YES must be at col 16" = names(maine_ref)[16] == "Question.5..Citizen.Initiative"
+)
 
 # Remove blank rows (county separator rows) and the second-row label row
 # (X... is the county code column; filter on X... not X, because X is an
@@ -255,10 +270,12 @@ maine_pres <- maine_pres %>%
 # in the full_join so neither source's data is silently discarded.
 maine_ref <- maine_ref %>% mutate(dist = str_squish(dist))
 
-# Full join on municipality name; rows in one file without a match in the other
-# are retained with NAs for the missing side (catches any municipality
-# present in only the pres or RCV file).
-maine_combine <- full_join(maine_pres, maine_ref, by = "dist") %>%
+# Full join on municipality name AND county code. Joining on dist alone would
+# produce a cross-product if two municipalities in different counties share a
+# name. Both files carry county_code after the select() calls above.
+# ~4-7 rows will still be unmatched due to naming differences between sources
+# (e.g. "RANGELEY" vs "RANGELEY/ADAMSTOWN TWP") — those get NA for the missing side.
+maine_combine <- full_join(maine_pres, maine_ref, by = c("dist", "county_code")) %>%
   mutate(
     precinct_id      = as.character(dist),
     dem_share        = clinton_share,
@@ -281,7 +298,8 @@ maine_combine <- full_join(maine_pres, maine_ref, by = "dist") %>%
 # ============================================================================
 
 albany <- read.csv("data/raw/albany_all_results_2020.csv") %>%
-  rename(Precinct_name = X...Precinct_name)
+  rename(Precinct_name = X...Precinct_name) %>%
+  select(-any_of("X"))   # drop trailing empty column produced by CSV exporter
 # Note: read.csv converts spaces in column names to dots, so the raw columns
 # "Election Day_ballots", "Election Night_votes", "Vote by Mail_ballots", etc.
 # become "Election.Day_ballots", "Election.Night_votes", "Vote.by.Mail_ballots", etc.
@@ -343,7 +361,8 @@ albany_measure <- albany %>%
     rcv_vbm_under   = Vote.by.Mail_under_votes,
     rcv_vbm_over    = Vote.by.Mail_over_votes
   ) %>%
-  mutate(yes_share = rcv_yes / rcv_total)
+  # Use contested votes (YES + NO) as denominator for cross-locale consistency.
+  mutate(yes_share = rcv_yes / (rcv_yes + rcv_no))
 
 # Presidential race — same pivot structure; rename only the main candidates
 albany_pres <- albany %>%
@@ -419,12 +438,12 @@ mn_pres <- read.csv("data/raw/minnesota_pres_2020.csv") %>%
 
 bloomington_combine <- left_join(bloomington_measure, mn_pres, by = "precinct") %>%
   mutate(
-    # yes_share uses YES + NO (contested votes only) so abstention on the
-    # local measure does not deflate the share relative to other locales.
-    # dem_share uses TOTVOTING (all voters in the precinct) as the denominator
-    # since USPRSDFL is the presidential candidate total, not a ballot measure.
+    # yes_share: contested votes only (YES + NO) for cross-locale consistency.
+    # dem_share: USPRSTOTAL is the total presidential votes cast in the precinct
+    # (sum of all candidates), which is the correct denominator — more precise
+    # than TOTVOTING (all voters across all races on the ballot).
     yes_share        = rcv_yes / (rcv_yes + rcv_no),
-    dem_share        = USPRSDFL / TOTVOTING,
+    dem_share        = USPRSDFL / USPRSTOTAL,
     precinct_id      = as.character(precinct),
     locale           = "Bloomington",
     state            = "Minnesota",
@@ -460,9 +479,10 @@ boulder_rcv <- boulder %>%
   # Boulder raw data has trailing spaces on numeric fields (e.g. "997 ").
   # Convert vote and ballot columns to numeric throughout.
   mutate(
-    across(c(rcv_yes, rcv_total, rcv_active_voters, rcv_undervotes, rcv_overvotes),
+    across(c(rcv_yes, rcv_no, rcv_total, rcv_active_voters, rcv_undervotes, rcv_overvotes),
            ~parse_number(as.character(.x))),
-    yes_share = rcv_yes / rcv_total
+    # Use contested votes (YES + NO) as denominator for cross-locale consistency.
+    yes_share = rcv_yes / (rcv_yes + rcv_no)
   )
 
 # Presidential race: pivot choice → per-candidate vote columns
@@ -534,7 +554,8 @@ eureka_measure <- read.csv("data/raw/eureka_rcv_2020.csv") %>%
                   rcv_writein, rcv_vbm, rcv_election_day, rcv_early,
                   rcv_total, rcv_reg_voters),
                 ~as.numeric(gsub(",", "", as.character(.x))))) %>%
-  mutate(yes_share = rcv_yes / rcv_total)
+  # Use contested votes (YES + NO) as denominator for cross-locale consistency.
+  mutate(yes_share = rcv_yes / (rcv_yes + rcv_no))
 
 # Aggregate Humboldt split precincts: the statewide database splits each precinct
 # into a base record and an "_A" record (absentee). Sum all numeric columns back
@@ -574,10 +595,9 @@ minnetonka_measure <- read.csv("data/raw/minnetonka_rcv_2020.csv") %>%
 
 minnetonka_combine <- left_join(minnetonka_measure, mn_pres, by = "precinct") %>%
   mutate(
-    # Same denominator logic as Bloomington: YES + NO for yes_share,
-    # TOTVOTING for dem_share (see comment in Bloomington section above).
+    # Same denominator logic as Bloomington (see comment there).
     yes_share        = rcv_yes / (rcv_yes + rcv_no),
-    dem_share        = USPRSDFL / TOTVOTING,
+    dem_share        = USPRSDFL / USPRSTOTAL,
     precinct_id      = as.character(precinct),
     locale           = "Minnetonka",
     state            = "Minnesota",
@@ -610,8 +630,12 @@ coerce_numeric_cols <- function(df) {
     function(x) {
       cleaned <- gsub(",", "", trimws(x))
       nums    <- suppressWarnings(as.numeric(cleaned))
-      # Only convert if ALL non-NA values successfully parse as numeric
-      if (all(is.na(nums) == is.na(x))) as.numeric(cleaned) else x
+      # Only convert if every originally non-NA value parsed successfully as
+      # numeric (i.e. produced a non-NA result). The previous condition
+      # `all(is.na(nums) == is.na(x))` was incorrect: it passed even when a
+      # non-NA string like "abc" became NA after as.numeric(), which would
+      # silently destroy identifier values.
+      if (all(!is.na(nums[!is.na(x)]))) as.numeric(cleaned) else x
     }
   ))
 }
@@ -634,7 +658,8 @@ states_and_cities <- bind_rows(locales)
 # ============================================================================
 
 swe <- read.csv("data/raw/statewide_elections_lpw_2006_2018.csv") %>%
-  rename(swe_state = X...State, winner_share = Winner.Share....)
+  rename(swe_state = X...State, winner_share = Winner.Share....) %>%
+  select(-any_of(c("X", "X.1", "X.2", "X.3", "X.4")))  # drop trailing empty columns from CSV exporter
 
 lpw_states <- swe %>%
   filter(winner_share < 40) %>%
