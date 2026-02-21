@@ -11,6 +11,7 @@ execute:
 library(dplyr)
 library(ggplot2)
 library(scales)
+library(plotly)
 
 load("../data/rcv_data.RData")
 ```
@@ -81,4 +82,57 @@ states_and_cities %>%
   ) +
   theme_bw(base_size = 12) +
   theme(legend.position = "right")
+```
+
+## Interactive (click legend to toggle locales)
+
+```{r}
+#| fig-width: 9
+#| fig-height: 6
+
+plot_data <- states_and_cities %>%
+  filter(!is.na(yes_share), !is.na(dem_share))
+
+# Build one trace per locale so legend clicks toggle individual locales
+p <- plot_ly(type = "scatter", mode = "markers")
+
+for (loc in names(locale_colors)) {
+  d <- filter(plot_data, locale == loc)
+  if (nrow(d) == 0) next
+
+  # OLS fit for trend line
+  fit <- lm(yes_share ~ dem_share, data = d)
+  xs  <- seq(min(d$dem_share, na.rm = TRUE),
+             max(d$dem_share, na.rm = TRUE), length.out = 80)
+  ys  <- predict(fit, newdata = data.frame(dem_share = xs))
+
+  p <- p %>%
+    add_trace(
+      x = d$dem_share, y = d$yes_share,
+      name        = loc,
+      legendgroup = loc,
+      marker      = list(color = locale_colors[[loc]], size = 5, opacity = 0.6),
+      text        = paste0(loc, "<br>", d$precinct_id),
+      hovertemplate = "%{text}<br>Dem: %{x:.1%}<br>Yes: %{y:.1%}<extra></extra>",
+      showlegend  = TRUE
+    ) %>%
+    add_trace(
+      x = xs, y = ys,
+      mode        = "lines",
+      name        = loc,
+      legendgroup = loc,
+      line        = list(color = locale_colors[[loc]], width = 1.8),
+      hoverinfo   = "skip",
+      showlegend  = FALSE
+    )
+}
+
+p %>% layout(
+  xaxis = list(title = "Democratic Presidential Vote Share",
+               tickformat = ".0%", range = c(0, 1)),
+  yaxis = list(title = "RCV Ballot Measure Yes Vote Share",
+               tickformat = ".0%", range = c(0, 1)),
+  legend    = list(title = list(text = "Locale")),
+  hovermode = "closest"
+)
 ```
