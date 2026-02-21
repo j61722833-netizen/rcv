@@ -1,0 +1,53 @@
+---
+title: "Democratic Share vs. RCV Yes Share by Locale"
+author: "Jesse Brandt"
+format: html
+execute:
+  echo: false
+  warning: false
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+load("../data/rcv_data.RData")
+```
+
+The values below use `yes_share = YES / (YES + NO)` (contested votes only) and
+`dem_share = Democratic votes / total presidential votes cast`. Both are computed
+consistently across all 8 locales in the new pipeline.
+
+```{r}
+#| fig-width: 9
+#| fig-height: 6
+
+locale_colors <- c(
+  Alaska        = "#E41A1C",
+  Maine         = "#FF7F00",
+  Massachusetts = "#984EA3",
+  Albany        = "#4DAF4A",
+  Bloomington   = "#377EB8",
+  Boulder       = "#A65628",
+  Eureka        = "#F781BF",
+  Minnetonka    = "#999999"
+)
+
+states_and_cities %>%
+  filter(!is.na(yes_share), !is.na(dem_share)) %>%
+  ggplot(aes(x = dem_share, y = yes_share, color = locale)) +
+  geom_point(size = 1.2, alpha = 0.6) +
+  geom_smooth(aes(group = locale), method = "lm", se = FALSE,
+              linewidth = 0.7) +
+  scale_color_manual(values = locale_colors) +
+  scale_x_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
+  labs(
+    x     = "Democratic Presidential Vote Share",
+    y     = "RCV Ballot Measure Yes Vote Share",
+    color = "Locale"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right")
+```
