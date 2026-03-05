@@ -78,7 +78,9 @@ ak_m2 <- ak_results %>%
 
 ak_combine <- right_join(ak_m2, ak_pres, by = "district") %>%
   mutate(
-    yes_share        = ak_rcv_yes / (ak_rcv_yes + ak_rcv_no),
+    rcv_yes          = as.double(ak_rcv_yes),
+    rcv_no           = as.double(ak_rcv_no),
+    yes_share        = rcv_yes / (rcv_yes + rcv_no),
     dem_share        = ak_pres_dem / (ak_pres_dem + ak_pres_con + ak_pres_ali +
                                       ak_pres_grn + ak_pres_lib + ak_pres_nom + ak_pres_rep),
     precinct_id      = as.character(district),
@@ -97,8 +99,8 @@ ak_combine <- right_join(ak_m2, ak_pres, by = "district") %>%
 #             Hawkins, All Others, No Preference, Blanks, Total Votes Cast
 # ============================================================================
 
-mass_rcv  <- read.csv("data/raw/massachusetts_rcv_2020.csv")
-mass_pres <- read.csv("data/raw/massachusetts_pres_2020.csv")
+mass_rcv  <- read.csv("data/raw/massachusetts_rcv_2020.csv", fileEncoding = "UTF-8-BOM")
+mass_pres <- read.csv("data/raw/massachusetts_pres_2020.csv", fileEncoding = "UTF-8-BOM")
 
 # Remove statewide totals row; construct a precinct identifier from locality + ward + precinct
 mass_pres <- mass_pres %>%
@@ -122,7 +124,11 @@ mass_pres <- mass_pres %>%
     across(c(pres_biden, pres_trump, pres_jorg, pres_hawk,
              pres_other, pres_nopref, pres_blank, pres_total),
            ~as.numeric(gsub(",", "", as.character(.x)))),
-    biden_share = pres_biden / pres_total
+    # Use sum of named candidates (excluding blanks) as denominator for
+    # consistency with other locales. pres_total (Total.Votes.Cast) includes
+    # blanks, which would deflate dem_share relative to locales that exclude them.
+    biden_share = pres_biden / (pres_biden + pres_trump + pres_jorg + pres_hawk +
+                                  pres_other + pres_nopref)
   )
 
 mass_rcv <- mass_rcv %>%
@@ -176,7 +182,8 @@ mass_combine <- inner_join(mass_pres, mass_rcv, by = "precinct") %>%
 #
 # maine_rcv_2016.csv inferred column layout:
 #   X     = county code (e.g. AND)
-#   X.1   = municipality name (join key)
+#   X.1   = asterisk marker (blank for most rows, "*" for some municipalities)
+#   X.2   = municipality name (join key)
 #   Question.1..Citizen.Initiative, X.2, X.3  = Q1 YES / NO / BLANK
 #   Question.2..Citizen.Initiative, X.4, X.5  = Q2 YES / NO / BLANK
 #   Question.3..Citizen.Initiative, X.6, X.7  = Q3 YES / NO / BLANK
@@ -192,73 +199,53 @@ mass_combine <- inner_join(mass_pres, mass_rcv, by = "precinct") %>%
 #   Clinton..Hillary.R., Johnson..Gary, Stein..Jill, Trump..Donald.J., …, TBC
 # ============================================================================
 
-maine_pres <- read.csv("data/raw/maine_pres_2016.csv")
-maine_ref  <- read.csv("data/raw/maine_rcv_2016.csv")
+maine_pres <- read.csv("data/raw/maine_pres_2016.csv", fileEncoding = "UTF-8-BOM")
+maine_ref  <- read.csv("data/raw/maine_rcv_2016.csv", fileEncoding = "UTF-8-BOM")
 
-# Guard: verify the auto-generated column names match expectation. Both files
-# have a UTF-8 BOM that shifts names (col 1 becomes "X..." instead of "X").
-# If the BOM is absent or the file layout changes, column mappings silently land
-# on wrong data. These assertions convert that failure mode into a clear error.
+# Both Maine files may or may not have a UTF-8 BOM. When the BOM is present,
+# R reads col 1 as "X..." (the BOM bytes become dots); when absent, col 1 is
+# just "X". Use positional indexing so the code works either way.
+# Q5 YES is always at column 16 regardless of BOM.
 stopifnot(
-  "maine_pres col 1 must be 'X...' (BOM expected)" = names(maine_pres)[1] == "X...",
-  "maine_pres col 2 must be 'X' (municipality name)" = names(maine_pres)[2] == "X",
-  "maine_ref col 1 must be 'X...' (BOM expected)"  = names(maine_ref)[1]  == "X...",
-  "maine_ref col 3 must be 'X.1' (municipality name)" = names(maine_ref)[3] == "X.1",
-  "maine_ref Q5 YES must be at col 16" = names(maine_ref)[16] == "Question.5..Citizen.Initiative"
+  "maine_ref Q5 YES must be at col 16"   = names(maine_ref)[16] == "Question.5..Citizen.Initiative",
+  "maine_ref Q5 NO must be at col 17"    = names(maine_ref)[17] == "X.11",
+  "maine_ref Q5 BLANK must be at col 18" = names(maine_ref)[18] == "X.12"
 )
 
-# Remove blank rows (county separator rows) and the second-row label row
-# (X... is the county code column; filter on X... not X, because X is an
-# asterisk marker column that is blank for most municipalities — filtering
-# X != "" would accidentally drop the majority of the data)
+# Rename positionally: col1=county, col3=municipality, col16=Q5 YES, col17=Q5 NO,
+# col18=Q5 BLANK. The last named column is Total.Ballots.Cast (stable name).
+names(maine_ref)[1]  <- "county_code"
+names(maine_ref)[3]  <- "dist"
+names(maine_ref)[16] <- "rcv_yes"
+names(maine_ref)[17] <- "rcv_no"
+names(maine_ref)[18] <- "rcv_blank"
+
 maine_ref <- maine_ref %>%
-  filter(X... != "", X... != "CTY") %>%
-  select(
-    county_code  = X...,   # county code (AND, ARO, etc.)
-    asterisk_ref = X,      # asterisk marker ("*" or blank); kept for reference
-    dist         = X.1,    # municipality name (join key)
-    # All six 2016 citizen initiative questions retained.
-    # Column names X.2–X.13 are inferred from the Q5 pattern; verify with names().
-    q1_yes = Question.1..Citizen.Initiative, q1_no = X.2,  q1_blank = X.3,
-    q2_yes = Question.2..Citizen.Initiative, q2_no = X.4,  q2_blank = X.5,
-    q3_yes = Question.3..Citizen.Initiative, q3_no = X.6,  q3_blank = X.7,
-    q4_yes = Question.4..Citizen.Initiative, q4_no = X.8,  q4_blank = X.9,
-    # Question 5 is the RCV citizen initiative
-    rcv_yes = Question.5..Citizen.Initiative, rcv_no = X.10, rcv_blank = X.11,
-    # Question 6 is a bond issue, retained for completeness
-    q6_yes = Question.6...Bond.Issue,         q6_no = X.12,  q6_blank = X.13,
-    maine_total_ballots = Total.Ballots.Cast
-  ) %>%
-  filter(dist != "MUNICIPALITY") %>%   # removes the second header row
-  mutate(across(q1_yes:maine_total_ballots, parse_number)) %>%
-  # Denominator is YES + NO only (not blank). Blank ballots represent abstention
-  # on this question, not opposition. Excluding blanks keeps yes_share comparable
-  # with all other locales which use only contested votes in the denominator.
+  filter(county_code != "", county_code != "CTY") %>%
+  rename(maine_total_ballots = Total.Ballots.Cast) %>%
+  filter(dist != "MUNICIPALITY") %>%
+  mutate(across(c(rcv_yes, rcv_no, rcv_blank, maine_total_ballots), parse_number)) %>%
   mutate(rcv_share = rcv_yes / (rcv_yes + rcv_no))
 
-# Remove blank separator rows (X... = "") and the second-row label row
-# (X... = "CTY"). Both files use X... as the county code column; filtering on
-# X... consistently avoids accidentally dropping real data rows.
-# County subtotal rows ("Total:") also have blank X... and are removed here.
+# maine_pres: col1=county, col2=municipality. Candidate columns have stable names.
+names(maine_pres)[1] <- "county_code"
+names(maine_pres)[2] <- "dist"
+
 maine_pres <- maine_pres %>%
-  filter(X... != "", X... != "CTY") %>%
-  select(
-    county_code      = X...,   # county code (AND, ARO, etc.)
-    dist             = X,      # municipality name (join key)
-    pres_clinton     = Clinton..Hillary.R.,
-    pres_johnson     = Johnson..Gary,
-    pres_stein       = Stein..Jill,
-    pres_trump       = Trump..Donald.J.,
-    pres_castle      = Castle..Darrell.L..,
-    pres_fox         = Fox..Cherunda.L..,
-    pres_kotlikoff   = Kotlikoff..Laurence.J..,
-    pres_mcmullin    = McMullin..David.Evan.,
-    pres_blank       = BLANK,
-    pres_total       = TBC
+  filter(county_code != "", county_code != "CTY") %>%
+  rename(
+    pres_clinton   = Clinton..Hillary.R.,
+    pres_johnson   = Johnson..Gary,
+    pres_stein     = Stein..Jill,
+    pres_trump     = Trump..Donald.J.,
+    pres_castle    = Castle..Darrell.L..,
+    pres_fox       = Fox..Cherunda.L..,
+    pres_kotlikoff = Kotlikoff..Laurence.J..,
+    pres_mcmullin  = McMullin..David.Evan.,
+    pres_blank     = BLANK,
+    pres_total     = TBC
   ) %>%
   filter(dist != "Town") %>%
-  # Trim leading/trailing whitespace from municipality names before joining.
-  # Both sources (MIT EDES pres, Maine SoS RCV) can have padded text fields.
   mutate(dist = str_squish(dist)) %>%
   mutate(across(pres_clinton:pres_total, parse_number)) %>%
   mutate(clinton_share = pres_clinton / pres_total)
@@ -297,8 +284,7 @@ maine_combine <- full_join(maine_pres, maine_ref, by = c("dist", "county_code"))
 #   will have the same value for every precinct in that contest.
 # ============================================================================
 
-albany <- read.csv("data/raw/albany_all_results_2020.csv") %>%
-  rename(Precinct_name = X...Precinct_name) %>%
+albany <- read.csv("data/raw/albany_all_results_2020.csv", fileEncoding = "UTF-8-BOM") %>%
   select(-any_of("X"))   # drop trailing empty column produced by CSV exporter
 # Note: read.csv converts spaces in column names to dots, so the raw columns
 # "Election Day_ballots", "Election Night_votes", "Vote by Mail_ballots", etc.
@@ -425,16 +411,16 @@ albany_combine <- left_join(
 #   results. All columns are retained.
 # ============================================================================
 
-bloomington_measure <- read.csv("data/raw/bloomington_rcv_2020.csv") %>%
-  rename(precinct = X...County..Precinct) %>%
+bloomington_measure <- read.csv("data/raw/bloomington_rcv_2020.csv", fileEncoding = "UTF-8-BOM") %>%
+  rename(precinct = County..Precinct) %>%
   filter(precinct != "Candidate Totals:") %>%   # remove the statewide totals row
   mutate(precinct = gsub("Hennepin: ", "", precinct)) %>%
   rename(rcv_yes = YES, rcv_no = NO) %>%
   mutate(across(c(rcv_yes, rcv_no), parse_number))
 
 # Minnesota statewide precinct file — loaded once and shared with Minnetonka below
-mn_pres <- read.csv("data/raw/minnesota_pres_2020.csv") %>%
-  rename(precinct = PCTNAME, VTDID = X...VTDID)
+mn_pres <- read.csv("data/raw/minnesota_pres_2020.csv", fileEncoding = "UTF-8-BOM") %>%
+  rename(precinct = PCTNAME)
 
 bloomington_combine <- left_join(bloomington_measure, mn_pres, by = "precinct") %>%
   mutate(
@@ -461,8 +447,8 @@ bloomington_combine <- left_join(bloomington_measure, mn_pres, by = "precinct") 
 #   Active.Voters, undervotes, and overvotes are retained for both contests.
 # ============================================================================
 
-boulder <- read.csv("data/raw/boulder_all_results_2020.csv") %>%
-  rename(Precinct.Name.Short = X...Precinct.Name..Short.)
+boulder <- read.csv("data/raw/boulder_all_results_2020.csv", fileEncoding = "UTF-8-BOM") %>%
+  rename(Precinct.Name.Short = Precinct.Name..Short.)
 
 # RCV measure (Question 2E): pivot choice → YES/FOR and NO/AGAINST columns
 boulder_rcv <- boulder %>%
@@ -526,8 +512,7 @@ boulder_combine <- left_join(boulder_rcv, boulder_pres, by = "precinct") %>%
 #   geographic precinct) are summed back to a single precinct before joining.
 # ============================================================================
 
-eureka_measure <- read.csv("data/raw/eureka_rcv_2020.csv") %>%
-  rename(Precinct = X...Precinct) %>%
+eureka_measure <- read.csv("data/raw/eureka_rcv_2020.csv", fileEncoding = "UTF-8-BOM") %>%
   filter(Precinct != "Totals") %>%   # remove the county-wide totals row
   rename(
     precinct          = Precinct,
@@ -560,7 +545,7 @@ eureka_measure <- read.csv("data/raw/eureka_rcv_2020.csv") %>%
 # Aggregate Humboldt split precincts: the statewide database splits each precinct
 # into a base record and an "_A" record (absentee). Sum all numeric columns back
 # to a single precinct row before joining to the RCV file.
-eureka_pres <- read.csv("data/raw/humboldt_pres_2020.csv") %>%
+eureka_pres <- read.csv("data/raw/humboldt_pres_2020.csv", fileEncoding = "UTF-8-BOM") %>%
   # Remove the trailing "_A" suffix that marks absentee-split records.
   # Use sub() with a $ anchor (not gsub) so only the trailing suffix is removed
   # and any "_A" that might appear elsewhere in the precinct name is untouched.
@@ -570,7 +555,8 @@ eureka_pres <- read.csv("data/raw/humboldt_pres_2020.csv") %>%
 
 eureka_combine <- left_join(eureka_measure, eureka_pres, by = "precinct") %>%
   mutate(
-    dem_share        = PRSDEM01 / TOTVOTE,
+    pres_total       = PRSDEM01 + PRSREP01 + PRSAIP01 + PRSGRN01 + PRSLIB01 + PRSPAF01,
+    dem_share        = PRSDEM01 / pres_total,
     precinct_id      = as.character(precinct),
     locale           = "Eureka",
     state            = "California",
@@ -586,8 +572,8 @@ eureka_combine <- left_join(eureka_measure, eureka_pres, by = "precinct") %>%
 # File: minnetonka_rcv_2020.csv
 # ============================================================================
 
-minnetonka_measure <- read.csv("data/raw/minnetonka_rcv_2020.csv") %>%
-  rename(precinct = X...County..Precinct) %>%
+minnetonka_measure <- read.csv("data/raw/minnetonka_rcv_2020.csv", fileEncoding = "UTF-8-BOM") %>%
+  rename(precinct = County..Precinct) %>%
   filter(precinct != "Candidate Totals:") %>%
   mutate(precinct = gsub("Hennepin: ", "", precinct)) %>%
   rename(rcv_yes = YES, rcv_no = NO) %>%
@@ -617,11 +603,11 @@ minnetonka_combine <- left_join(minnetonka_measure, mn_pres, by = "precinct") %>
 # converted to numeric. This resolves type conflicts that arise when the same
 # column name is character in one locale (comma-formatted numbers, trailing
 # spaces, or small values read as integer) and double in another.
-# Columns that are intentionally character identifiers and must not be coerced
+# Columns that are intentionally character identifiers and must not be coerced.
 char_id_cols <- c("precinct_id", "precinct", "locale", "state", "city",
                   "rcv_jurisdiction", "svprec", "district", "dist",
                   "county_code", "rcv_turnout_pct", "PCTNAME", "PCTCODE",
-                  "MCDNAME", "COUNTYNAME", "Precinct_name", "Precinct.Name")
+                  "MCDNAME", "COUNTYNAME", "Precinct_name")
 
 coerce_numeric_cols <- function(df) {
   cols_to_try <- setdiff(names(df)[sapply(df, is.character)], char_id_cols)
@@ -657,8 +643,8 @@ states_and_cities <- bind_rows(locales)
 # states had statewide RCV measures (they did not in this dataset).
 # ============================================================================
 
-swe <- read.csv("data/raw/statewide_elections_lpw_2006_2018.csv") %>%
-  rename(swe_state = X...State, winner_share = Winner.Share....) %>%
+swe <- read.csv("data/raw/statewide_elections_lpw_2006_2018.csv", fileEncoding = "UTF-8-BOM") %>%
+  rename(swe_state = State, winner_share = Winner.Share....) %>%
   select(-any_of(c("X", "X.1", "X.2", "X.3", "X.4")))  # drop trailing empty columns from CSV exporter
 
 lpw_states <- swe %>%
