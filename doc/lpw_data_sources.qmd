@@ -1,0 +1,73 @@
+---
+title: "Low Plurality Winner (LPW) Data Sources"
+author: "Jesse Brandt"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Background
+
+The `recent_lpw` variable flags whether a locale's state had a statewide race
+(governor or U.S. senator) won with less than 40% of the vote within 10 years
+of the RCV ballot measure. The two cases in this study:
+
+- **Maine**: Governor Paul LePage won in 2010 with 37.6%
+  ([Ballotpedia](https://ballotpedia.org/Maine_gubernatorial_election,_2010))
+- **Alaska**: Senator Lisa Murkowski won in 2010 with 39.7% (write-in)
+  ([Ballotpedia](https://ballotpedia.org/Lisa_Murkowski))
+
+The current project uses a hand-built CSV
+(`data/raw/statewide_elections_lpw_2006_2018.csv`) covering the 6 states in
+the dataset. This is sufficient for the current scope.
+
+## U.S. Senate returns (MEDSL)
+
+For reference, a consolidated U.S. Senate general election returns file
+(1976--2020) from the MIT Election Data + Science Lab has been downloaded.
+
+- **Citation**: MIT Election Data and Science Lab, 2017, "U.S. Senate 1976--2020",
+  <https://doi.org/10.7910/DVN/PEJ5QU>, Harvard Dataverse
+- **File**: `data/raw/medsl_senate_1976_2020.csv`
+- **Download**: Harvard Dataverse API, file ID 7609736
+
+```{r download-senate, eval=FALSE}
+download.file(
+  url = "https://dataverse.harvard.edu/api/access/datafile/7609736?format=original",
+  destfile = "data/raw/medsl_senate_1976_2020.csv",
+  mode = "wb"
+)
+```
+
+### Senate races won with < 40% (2006+)
+
+```{r senate-lpw}
+library(dplyr)
+
+sen <- read.csv("../data/raw/medsl_senate_1976_2020.csv")
+
+senate_winners <- sen %>%
+  filter(stage == "gen", writein == "False") %>%
+  group_by(year, state, state_po, totalvotes) %>%
+  summarise(winner_votes = max(candidatevotes), .groups = "drop") %>%
+  mutate(winner_share = round(100 * winner_votes / totalvotes, 1))
+
+senate_winners %>%
+  filter(winner_share < 40, year >= 2006) %>%
+  arrange(winner_share) %>%
+  select(year, state, winner_share) %>%
+  knitr::kable(caption = "U.S. Senate races won with < 40% (2006+)")
+```
+
+Alaska 2010 appears at 35.6% — this is Joe Miller's plurality among
+non-write-in candidates. Murkowski's write-in share was 39.7%. Either way,
+no candidate cleared 40%, confirming the LPW classification.
+
+## Future research
+
+MEDSL does not publish a consolidated governor returns file. If expanding to
+new locales, governor races would need to be checked manually (e.g. from
+Ballotpedia) or scraped. Low-plurality governors are rare; for the current
+8-locale dataset the hand-built CSV is sufficient.
