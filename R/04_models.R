@@ -18,15 +18,19 @@ library(broom)
 library(broom.mixed)
 
 # --- Load and reconstruct full imputed datasets ---
-load("data/rcv_data_mids.RData")
+load("data/rcv_data_mids.RData")   # mids + analysis_rows
 load("data/rcv_data_census.RData")
 
 long <- complete(mids, action = "long", include = TRUE)
 
+# Use analysis_rows (saved in 03_imputation.R) to align outcome columns with
+# the imputation dataframe. The mids object was built on a subset of rows
+# (those with non-NA dem_share), so we must index the census data accordingly.
+census_subset <- states_and_cities_census[analysis_rows, ]
 attach_cols <- c("yes_share", "rcv_yes", "rcv_no", "precinct_id",
                  "locale", "state", "rcv_jurisdiction")
 for (col in attach_cols) {
-  long[[col]] <- rep(states_and_cities_census[[col]], times = mids$m + 1)
+  long[[col]] <- rep(census_subset[[col]], times = mids$m + 1)
 }
 
 full_mids <- as.mids(long)

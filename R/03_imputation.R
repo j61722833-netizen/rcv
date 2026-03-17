@@ -56,6 +56,9 @@ cat(sprintf("  %-18s %4d NA (%5.1f%%)\n", "dem_share",
 rows_before <- nrow(imp_df)
 complete_predictor_mask <- !is.na(imp_df$dem_share)
 cat("\nRows with dem_share NA (excluded from imputation):", sum(!complete_predictor_mask), "\n")
+analysis_rows <- which(complete_predictor_mask)
+imp_df <- imp_df[complete_predictor_mask, ]
+cat("Rows after filtering:", nrow(imp_df), "\n")
 
 # --- Set up mice ---
 cat("\n=== Running mice ===\n")
@@ -142,7 +145,7 @@ states_and_cities_imputed %>%
 
 # --- Save ---
 save(states_and_cities_imputed, file = "data/rcv_data_imputed.RData")
-save(mids, file = "data/rcv_data_mids.RData")
+save(mids, analysis_rows, file = "data/rcv_data_mids.RData")
 write.csv(states_and_cities_imputed, file = "data/states_and_cities_imputed.csv",
           row.names = FALSE)
 
@@ -150,12 +153,4 @@ cat("\nSaved:\n")
 cat("  data/rcv_data_imputed.RData  — single imputed dataset (imputation 1)\n")
 cat("  data/rcv_data_mids.RData     — mids object (5 imputations, for mice::pool)\n")
 cat("  data/states_and_cities_imputed.csv\n")
-cat("\nFor pooled regression:\n")
-cat("  library(mice)\n")
-cat("  load('data/rcv_data_mids.RData')\n")
-cat("  # Reconstruct full mids with outcome attached:\n")
-cat("  full_imp <- complete(mids, action = 'long', include = TRUE)\n")
-cat("  full_imp$yes_share <- states_and_cities_census$yes_share\n")
-cat("  full_mids <- as.mids(full_imp)\n")
-cat("  fit <- with(full_mids, lm(yes_share ~ dem_share + recent_lpw + pct_white_vap))\n")
-cat("  summary(pool(fit))\n")
+cat("\nFor pooled regression, see R/04_models.R\n")

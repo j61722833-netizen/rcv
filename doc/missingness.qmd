@@ -112,7 +112,7 @@ maine_ref <- maine_ref %>%
          rcv_no = X.10, rcv_blank = X.11) %>%
   filter(dist != "MUNICIPALITY") %>%
   mutate(across(rcv_yes:rcv_blank, parse_number)) %>%
-  mutate(rcv_share = rcv_yes / (rcv_yes + rcv_no + rcv_blank))
+  mutate(rcv_share = rcv_yes / (rcv_yes + rcv_no))
 
 maine_pres <- maine_pres %>%
   filter(X != "", X != "CTY") %>%
@@ -233,7 +233,7 @@ print(colSums(is.na(states_and_cities)))
 
 cat("\nNAs by place:\n")
 states_and_cities %>%
-  group_by(place) %>%
+  group_by(locale) %>%
   summarize(
     n = n(),
     na_precinct_id = sum(is.na(precinct_id)),

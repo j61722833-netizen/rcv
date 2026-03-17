@@ -248,7 +248,13 @@ maine_pres <- maine_pres %>%
   filter(dist != "Town") %>%
   mutate(dist = str_squish(dist)) %>%
   mutate(across(pres_clinton:pres_total, parse_number)) %>%
-  mutate(clinton_share = pres_clinton / pres_total)
+  # Use sum of named candidates (excluding blanks) as denominator for
+  # consistency with other locales. pres_total (TBC) includes blanks,
+  # which would deflate dem_share relative to locales that exclude them.
+  mutate(clinton_share = pres_clinton / (pres_clinton + pres_trump +
+                                          pres_johnson + pres_stein +
+                                          pres_castle + pres_fox +
+                                          pres_kotlikoff + pres_mcmullin))
 
 # Trim municipality names in maine_ref as well.
 # NOTE: ~38 municipalities will still be unmatched after trimming because
@@ -375,7 +381,9 @@ albany_pres <- albany %>%
     pres_vbm_under  = Vote.by.Mail_under_votes,
     pres_vbm_over   = Vote.by.Mail_over_votes
   ) %>%
-  mutate(biden_share = pres_biden / pres_total)
+  # Use contested votes (Biden + Trump + third-party) as denominator,
+  # excluding under/overvotes, for cross-locale consistency.
+  mutate(biden_share = pres_biden / (pres_total - pres_under - pres_over))
 
 # Join measure and presidential data on precinct name.
 # Precinct-level metadata (Reg_voters, Turn_Out, etc.) is identical in both
@@ -486,7 +494,8 @@ boulder_pres <- boulder %>%
     across(c(pres_biden, pres_trump, pres_total, pres_active_voters,
              pres_undervotes, pres_overvotes),
            ~parse_number(as.character(.x))),
-    biden_share = pres_biden / pres_total
+    # Use contested votes (excluding under/overvotes) for cross-locale consistency.
+    biden_share = pres_biden / (pres_total - pres_undervotes - pres_overvotes)
   )
 
 boulder_combine <- left_join(boulder_rcv, boulder_pres, by = "precinct") %>%

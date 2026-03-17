@@ -1,0 +1,54 @@
+---
+title: "Methodological Caveats and Limitations"
+format: html
+---
+
+## 1. Ecological Fallacy
+
+All analysis is at the precinct level, not the individual voter level. Coefficients describe associations between precinct-level aggregate characteristics and precinct-level RCV support. They cannot be interpreted as individual-level effects.
+
+For example, a negative coefficient on `pct_black_vap` does *not* mean that Black voters oppose RCV. It means that precincts with higher Black population share tend to have lower yes-share after controlling for partisanship. These precincts may differ on unmeasured dimensions (information environment, campaign spending, ballot design) that drive the association.
+
+## 2. Observational Design --- Association, Not Causation
+
+This is an observational, cross-sectional study. The coefficients on `dem_share`, `recent_lpw`, and the demographic controls reflect *associations*, not causal effects. Higher Democratic vote share and higher RCV support could both be driven by underlying voter preferences, education levels, urbanization, or other latent factors not fully captured by the controls.
+
+No causal language (e.g., "partisanship increases RCV support") is warranted without a credible identification strategy (e.g., regression discontinuity, instrumental variables, or a natural experiment).
+
+## 3. Massachusetts Dominance
+
+Massachusetts contributes 2,173 of 3,446 observations (63%). The pooled regression estimates are disproportionately driven by Massachusetts precincts. The GLMM (Model 3) with random intercepts by locale partially addresses this by allowing locale-specific baselines, but fixed-effect slopes are still dominated by the largest sample.
+
+Sensitivity checks to consider:
+
+- Re-estimate excluding Massachusetts entirely
+- Weight locales equally (inverse sample-size weights)
+- Report locale-specific OLS regressions alongside pooled results
+
+## 4. Small City Samples
+
+Several city-level locales have very few precincts: Albany (n=3), Eureka (n=11), Minnetonka (n=23), Bloomington (n=32). These contribute almost no statistical information to the pooled regression but do affect estimates through the random intercepts in the GLMM. Results for these locales should be interpreted with caution.
+
+Sensitivity check: re-estimate dropping locales with n < 30.
+
+## 5. Maine Temporal Misalignment
+
+Maine's RCV ballot measure was in 2016, while Census demographics come from the 2010 Decennial Census (PL94-171 race/ethnicity) and the 2016--2020 ACS 5-year estimates (socioeconomic variables). The PL94-171 data is 6 years older than the election, and the ACS estimates straddle the election year rather than preceding it.
+
+If demographics shifted meaningfully between the Census snapshot and the 2016 election, the associations between demographics and RCV support will be attenuated. This affects Maine more than the 2020 locales, which are well-aligned with the 2020 Census.
+
+## 6. Multiple Imputation Assumptions
+
+The imputation model uses predictive mean matching (PMM) with `dem_share`, `locale`, and `recent_lpw` as predictors. This assumes demographics are Missing At Random (MAR) conditional on these variables.
+
+The actual missingness is geographically structured: unorganized territories in Maine, rural Alaska communities, and small Massachusetts towns lack ACS coverage. If these areas are systematically different from observed areas in ways not captured by `dem_share` and `locale` (Missing Not At Random, MNAR), imputed values will be biased.
+
+The impact is likely modest (~11% of observations imputed for ACS variables, ~1.5% for PL94-171), but a complete-case sensitivity analysis should confirm that results do not change materially when imputed observations are excluded.
+
+## 7. Interaction Between Partisanship and Low Plurality Winners
+
+The baseline models (M1, M2) use an additive specification: `dem_share + recent_lpw`. However, the scatterplots suggest that the *slope* of `dem_share` may differ between LPW and non-LPW locales, not just the intercept. An interaction term (`dem_share * recent_lpw`) should be tested. If significant, the additive model understates the effect of partisanship in LPW states and overstates it in non-LPW states.
+
+## 8. Overdispersion
+
+The quasibinomial models show dispersion parameters of 7--9, indicating substantial overdispersion relative to the binomial assumption. This is expected for aggregate vote data (voters within precincts are not independent), and the quasibinomial family corrects standard errors accordingly. However, the magnitude suggests that precinct-level unobserved heterogeneity is large. The GLMM with random intercepts by locale captures some of this, but within-locale heterogeneity remains.
