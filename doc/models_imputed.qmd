@@ -1,0 +1,243 @@
+---
+title: "RCV Models with Demographic Controls (Imputed Data)"
+author: "Jesse Brandt"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(mice)
+library(dplyr)
+library(lme4)
+library(broom)
+library(broom.mixed)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(scales)
+
+load("../data/model_results.RData")
+```
+
+## Overview
+
+All models use a **quasibinomial GLM** with logit link on `cbind(rcv_yes, rcv_no)` —
+each ballot is treated as a Bernoulli trial, with quasibinomial correction for
+overdispersion. Results are pooled across 5 multiply-imputed datasets using Rubin's rules.
+Imputation excluded all RCV outcome variables.
+
+**Models:**
+
+- **M1**: Quasibinomial baseline — `dem_share + recent_lpw` only
+- **M2**: Quasibinomial + demographic controls
+- **M3**: GLMM with random intercept by locale + controls
+
+**Demographic controls** (PL94-171 + ACS 5-year):
+`pct_white_vap`, `pct_black_vap`, `pct_hispanic_vap`, `median_income`, `pct_bach_plus`, `pct_renter`
+
+## Data summary
+
+```{r summary}
+diag_data %>%
+  group_by(locale, rcv_jurisdiction, recent_lpw) %>%
+  summarise(
+    n = n(),
+    mean_yes = mean(yes_share),
+    mean_dem = mean(dem_share),
+    mean_white = mean(pct_white_vap),
+    med_income = median(median_income),
+    mean_bach = mean(pct_bach_plus),
+    .groups = "drop"
+  ) %>%
+  kable(digits = 3, caption = "Analysis sample by locale")
+```
+
+## Model 1: Quasibinomial baseline
+
+$$\text{logit}(p) = \beta_0 + \beta_1 \cdot \text{dem\_share} + \beta_2 \cdot \text{recent\_lpw}$$
+
+```{r m1}
+summary(pool_m1) %>%
+  kable(digits = 4, caption = "M1: Quasibinomial baseline (pooled)")
+```
+
+## Model 2: Quasibinomial with demographic controls
+
+$$\text{logit}(p) = \beta_0 + \beta_1 \cdot \text{dem\_share} + \beta_2 \cdot \text{recent\_lpw} + \boldsymbol{\gamma} \cdot \mathbf{X}_{\text{demo}}$$
+
+```{r m2}
+summary(pool_m2) %>%
+  kable(digits = 4, caption = "M2: Quasibinomial + controls (pooled)")
+```
+
+### Adjusted pseudo-R² comparison
+
+Deviance-based: $1 - \frac{\text{deviance}/\text{df}_{\text{resid}}}{\text{null deviance}/\text{df}_{\text{null}}}$. Penalizes for number of parameters.
+
+```{r pseudo-r2}
+tibble(
+  Model = c("M1: Baseline", "M2: + Demographics"),
+  `Pseudo-R²` = round(c(pr2_m1$pseudo_r2, pr2_m2$pseudo_r2), 4),
+  `Adj. Pseudo-R²` = round(c(pr2_m1$adj_pseudo_r2, pr2_m2$adj_pseudo_r2), 4)
+) %>%
+  kable(caption = "Deviance-based pseudo-R² (averaged across 5 imputations)")
+```
+
+### F-test: are demographic controls jointly significant?
+
+```{r f-test}
+f_tests <- lapply(1:length(fit_m1$analyses), function(i) {
+  anova(fit_m1$analyses[[i]], fit_m2$analyses[[i]], test = "F")
+})
+
+tibble(
+  Imputation = 1:length(f_tests),
+  `F statistic` = sapply(f_tests, function(a) round(a$F[2], 1)),
+  `p-value` = sapply(f_tests, function(a) format.pval(a$`Pr(>F)`[2], digits = 3))
+) %>%
+  kable(caption = "F-test: M1 vs M2 (demographic controls jointly)")
+```
+
+### Overdispersion
+
+```{r overdispersion}
+tibble(
+  Model = c("M1: Baseline", "M2: + Controls"),
+  `Dispersion (dev/df)` = c(
+    round(mean(sapply(fit_m1$analyses, function(m) deviance(m)/df.residual(m))), 1),
+    round(mean(sapply(fit_m2$analyses, function(m) deviance(m)/df.residual(m))), 1)
+  )
+) %>%
+  kable(caption = "Overdispersion (1.0 = none; quasibinomial corrects SEs)")
+```
+
+### Interpretation (M2)
+
+All coefficients are on the **log-odds scale**. The core finding holds: `dem_share`
+and `recent_lpw` remain strong positive predictors of RCV support. Among the
+demographic controls:
+
+- **`pct_bach_plus`** (education) is the strongest new predictor — more educated
+  precincts support RCV more, controlling for partisanship.
+- **`pct_renter`** is positive — more urban/transient precincts favor RCV.
+- **`pct_black_vap`** is strongly negative — precincts with more Black residents
+  are less supportive, holding partisanship constant.
+- **`median_income`** is negative — wealthier precincts slightly less supportive,
+  holding education constant.
+
+## Model 3: GLMM with random intercept by locale
+
+Accounts for unobserved locale-level variation (campaign spending, ballot language,
+media environment) via random intercepts.
+
+```{r m3}
+summary(pool_m3) %>%
+  kable(digits = 4, caption = "M3: GLMM random intercept + controls (pooled)")
+```
+
+### Random effects (imputation 1)
+
+```{r m3-ranef}
+ranef(fit_m3$analyses[[1]])$locale %>%
+  tibble::rownames_to_column("locale") %>%
+  rename(intercept_shift = `(Intercept)`) %>%
+  arrange(desc(intercept_shift)) %>%
+  kable(digits = 3,
+        caption = "Locale random intercepts (log-odds, imputation 1)")
+```
+
+## Model comparison
+
+```{r comparison}
+tibble(
+  Model = c("M1: Quasibinom baseline",
+            "M2: Quasibinom + demographics",
+            "M3: GLMM + demographics"),
+  `Adj. pseudo-R²` = c(
+    round(pr2_m1$adj_pseudo_r2, 4),
+    round(pr2_m2$adj_pseudo_r2, 4),
+    "—"
+  ),
+  Notes = c(
+    "",
+    "Demographics jointly significant (F-test p < 2e-16)",
+    "Random intercept absorbs locale-level heterogeneity"
+  )
+) %>%
+  kable(caption = "Model overview")
+```
+
+## Coefficient comparison: M1 vs M2
+
+```{r coefplot-m1m2, fig.width=9, fig.height=6}
+coefs <- bind_rows(
+  summary(pool_m1) %>% mutate(model = "M1: Baseline"),
+  summary(pool_m2) %>% mutate(model = "M2: + Demographics")
+) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    lo = estimate - 1.96 * std.error,
+    hi = estimate + 1.96 * std.error,
+    term = case_match(term,
+      "dem_share" ~ "Dem. vote share",
+      "recent_lpw" ~ "Recent LPW (=TRUE)",
+      "pct_white_vap" ~ "% White VAP",
+      "pct_black_vap" ~ "% Black VAP",
+      "pct_hispanic_vap" ~ "% Hispanic VAP",
+      "median_income" ~ "Median income",
+      "pct_bach_plus" ~ "% Bachelor's+",
+      "pct_renter" ~ "% Renter",
+      .default = term
+    )
+  )
+
+ggplot(coefs, aes(x = estimate, y = reorder(term, estimate), color = model)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_pointrange(aes(xmin = lo, xmax = hi),
+                  position = position_dodge(width = 0.5), size = 0.5) +
+  scale_color_manual(values = c("M1: Baseline" = "#4575B4",
+                                "M2: + Demographics" = "#D73027")) +
+  labs(x = "Estimate (log-odds, 95% CI)", y = NULL, color = NULL,
+       title = "Quasibinomial coefficient comparison") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "top")
+```
+
+## Coefficient comparison: M2 vs M3
+
+```{r coefplot-m2m3, fig.width=10, fig.height=6}
+coefs_all <- bind_rows(
+  summary(pool_m2) %>% mutate(model = "M2: Quasibinom"),
+  summary(pool_m3) %>% mutate(model = "M3: GLMM")
+) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    lo = estimate - 1.96 * std.error,
+    hi = estimate + 1.96 * std.error,
+    term = case_match(term,
+      "dem_share" ~ "Dem. vote share",
+      "recent_lpw" ~ "Recent LPW (=TRUE)",
+      "pct_white_vap" ~ "% White VAP",
+      "pct_black_vap" ~ "% Black VAP",
+      "pct_hispanic_vap" ~ "% Hispanic VAP",
+      "median_income" ~ "Median income",
+      "pct_bach_plus" ~ "% Bachelor's+",
+      "pct_renter" ~ "% Renter",
+      .default = term
+    )
+  )
+
+ggplot(coefs_all, aes(x = estimate, y = reorder(term, estimate), color = model)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_pointrange(aes(xmin = lo, xmax = hi),
+                  position = position_dodge(width = 0.5), size = 0.5) +
+  scale_color_manual(values = c("M2: Quasibinom" = "#4575B4",
+                                "M3: GLMM" = "#1B7837")) +
+  labs(x = "Estimate (log-odds, 95% CI)", y = NULL, color = NULL,
+       title = "Quasibinomial vs. GLMM coefficient comparison") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "top")
+```

@@ -1,0 +1,219 @@
+---
+title: "Regression Diagnostics"
+author: "Jesse Brandt"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(knitr)
+library(broom)
+
+load("../data/model_results.RData")
+```
+
+Diagnostics on single-imputation fits (imputation 1) of the quasibinomial GLM with
+demographic controls (M2). Pooled estimates across all 5 imputations are substantively
+identical.
+
+## 1. Deviance residuals vs. fitted
+
+```{r resid-fitted, fig.width=8, fig.height=5}
+diag_data$.dev_resid <- residuals(diag_m2, type = "deviance")
+diag_data$.fitted_p <- fitted(diag_m2)
+
+ggplot(diag_data, aes(x = .fitted_p, y = .dev_resid)) +
+  geom_hline(yintercept = 0, color = "grey50", linetype = "dashed") +
+  geom_point(aes(color = locale), alpha = 0.3, size = 0.8) +
+  geom_smooth(method = "loess", se = FALSE, color = "black", linewidth = 0.8) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Fitted probability", y = "Deviance residuals",
+       title = "M2: Deviance residuals vs. fitted", color = "Locale") +
+  theme_bw(base_size = 13)
+```
+
+## 2. Pearson residuals vs. linear predictor
+
+```{r pearson, fig.width=8, fig.height=5}
+diag_data$.pearson <- residuals(diag_m2, type = "pearson")
+diag_data$.eta <- predict(diag_m2, type = "link")
+
+ggplot(diag_data, aes(x = .eta, y = .pearson)) +
+  geom_hline(yintercept = 0, color = "grey50", linetype = "dashed") +
+  geom_point(aes(color = locale), alpha = 0.3, size = 0.8) +
+  geom_smooth(method = "loess", se = FALSE, color = "black", linewidth = 0.8) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Linear predictor (log-odds)", y = "Pearson residuals",
+       title = "M2: Pearson residuals vs. linear predictor",
+       color = "Locale") +
+  theme_bw(base_size = 13)
+```
+
+## 3. Overdispersion
+
+```{r overdispersion}
+disp <- deviance(diag_m2) / df.residual(diag_m2)
+cat("Dispersion parameter (deviance/df):", round(disp, 2), "\n\n")
+cat("Values >> 1 indicate overdispersion, expected in aggregate vote data\n")
+cat("(voters within a precinct are correlated, not independent Bernoulli trials).\n")
+cat("The quasibinomial model corrects standard errors for this.\n")
+```
+
+## 4. Heteroskedasticity
+
+Variance of Pearson residuals across bins of the fitted value. For a well-specified
+quasibinomial, this should be roughly constant (around the dispersion parameter).
+
+```{r heterosked, fig.width=8, fig.height=5}
+diag_data$.fitted_bin <- cut(diag_data$.fitted_p, breaks = 20)
+
+bin_var <- diag_data %>%
+  group_by(.fitted_bin) %>%
+  summarise(
+    mean_fitted = mean(.fitted_p),
+    var_pearson = var(.pearson),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n >= 10)
+
+ggplot(bin_var, aes(x = mean_fitted, y = var_pearson)) +
+  geom_hline(yintercept = disp, linetype = "dashed", color = "red",
+             linewidth = 0.8) +
+  geom_point(aes(size = n), alpha = 0.7) +
+  geom_smooth(method = "loess", se = FALSE, color = "black", linewidth = 0.8) +
+  labs(x = "Mean fitted probability (binned)",
+       y = "Variance of Pearson residuals",
+       title = "Heteroskedasticity diagnostic",
+       subtitle = "Red line = overall dispersion; flat = homoskedastic",
+       size = "Precincts\nin bin") +
+  theme_bw(base_size = 13)
+```
+
+## 5. Residuals by locale
+
+```{r resid-locale, fig.width=9, fig.height=5}
+ggplot(diag_data, aes(x = locale, y = .dev_resid, fill = locale)) +
+  geom_hline(yintercept = 0, color = "grey50", linetype = "dashed") +
+  geom_boxplot(alpha = 0.7, outlier.size = 0.8) +
+  scale_fill_brewer(palette = "Dark2", guide = "none") +
+  labs(x = NULL, y = "Deviance residuals",
+       title = "M2: Residuals by locale") +
+  theme_bw(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+## 6. Q-Q plot
+
+```{r qq, fig.width=6, fig.height=6}
+ggplot(diag_data, aes(sample = .dev_resid)) +
+  stat_qq(alpha = 0.3, size = 0.8) +
+  stat_qq_line(color = "#D73027") +
+  labs(x = "Theoretical quantiles", y = "Deviance residuals",
+       title = "M2: Normal Q-Q plot") +
+  theme_bw(base_size = 13)
+```
+
+## 7. Influence: Cook's distance
+
+```{r cooks, fig.width=8, fig.height=5}
+diag_data$.cooks <- cooks.distance(diag_m2)
+threshold <- 4 / nrow(diag_data)
+
+ggplot(diag_data, aes(x = seq_along(.cooks), y = .cooks)) +
+  geom_point(aes(color = locale), alpha = 0.5, size = 0.8) +
+  geom_hline(yintercept = threshold, linetype = "dashed", color = "red") +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Observation index", y = "Cook's distance",
+       title = "M2: Cook's distance",
+       subtitle = paste("Red line = 4/n =", round(threshold, 5)),
+       color = "Locale") +
+  theme_bw(base_size = 13)
+```
+
+```{r cooks-top}
+high_cooks <- diag_data %>%
+  filter(.cooks > threshold) %>%
+  select(precinct_id, locale, dem_share, yes_share, .fitted_p, .dev_resid, .cooks) %>%
+  arrange(desc(.cooks))
+
+cat("Observations above 4/n threshold:", nrow(high_cooks), "/", nrow(diag_data), "\n\n")
+high_cooks %>% head(10) %>% kable(digits = 4, caption = "Top 10 influential observations")
+```
+
+## 8. Multicollinearity (VIF)
+
+```{r vif}
+X <- model.matrix(diag_m2)[, -1]
+vif_vals <- sapply(seq_len(ncol(X)), function(j) {
+  r2 <- summary(lm(X[, j] ~ X[, -j]))$r.squared
+  1 / (1 - r2)
+})
+names(vif_vals) <- colnames(X)
+
+tibble(term = names(vif_vals), VIF = round(vif_vals, 2)) %>%
+  arrange(desc(VIF)) %>%
+  kable(caption = "Variance Inflation Factors. VIF > 10 = concern.")
+```
+
+## 9. Partial-effect plots
+
+Predicted probability of RCV support across the range of each demographic variable,
+holding other predictors at their medians.
+
+```{r partial-effects, fig.width=10, fig.height=8}
+key_vars <- c("pct_white_vap", "pct_bach_plus", "median_income", "pct_renter")
+var_labels <- c("% White VAP", "% Bachelor's+", "Median Income", "% Renter")
+
+medians <- diag_data %>%
+  summarise(across(c(dem_share, recent_lpw, pct_white_vap, pct_black_vap,
+                     pct_hispanic_vap, median_income, pct_bach_plus, pct_renter),
+                   median))
+
+plots <- lapply(seq_along(key_vars), function(k) {
+  v <- key_vars[k]
+  grid <- medians[rep(1, 200), ]
+  grid[[v]] <- seq(min(diag_data[[v]], na.rm = TRUE),
+                   max(diag_data[[v]], na.rm = TRUE),
+                   length.out = 200)
+  grid$pred <- predict(diag_m2, newdata = grid, type = "response")
+
+  ggplot(grid, aes(x = .data[[v]], y = pred)) +
+    geom_line(color = "#D73027", linewidth = 1) +
+    geom_rug(data = diag_data, aes(x = .data[[v]], y = NULL),
+             alpha = 0.1, sides = "b") +
+    scale_y_continuous(labels = percent_format(1), limits = c(0.2, 0.8)) +
+    labs(x = var_labels[k], y = "Predicted P(Yes)",
+         title = var_labels[k]) +
+    theme_bw(base_size = 11)
+})
+
+gridExtra::grid.arrange(grobs = plots, ncol = 2,
+                        top = "Partial effects (other variables at median)")
+```
+
+## Summary
+
+```{r summary-table}
+tibble(
+  Diagnostic = c(
+    "Overdispersion",
+    "Influential obs (Cook's D > 4/n)",
+    "Max VIF",
+    "Heteroskedasticity"
+  ),
+  Result = c(
+    paste(round(disp, 1), "(corrected by quasibinomial)"),
+    paste(nrow(high_cooks), "of", nrow(diag_data)),
+    round(max(vif_vals), 2),
+    "See binned variance plot above"
+  )
+) %>%
+  kable(caption = "Diagnostic summary")
+```

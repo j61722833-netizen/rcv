@@ -75,6 +75,24 @@ All Quarto documents load `old/rcv_data.RData` which contains the pre-processed 
 - The "Low Plurality Winner" variable (recent statewide races won with <40%) explains the cluster difference
 - Linear model: `yes_share ~ dem_share + recent_lpw`
 
+## Environment Variables
+
+Census API key is stored in `/workspace/.env` (gitignored). To load it in R:
+
+```r
+Sys.setenv(CENSUS_API_KEY = readLines("/workspace/.env") |>
+  grep("^CENSUS_API_KEY=", value = TRUE) |>
+  sub("CENSUS_API_KEY=", "", x = _))
+```
+
+Or export before launching R:
+
+```bash
+export $(cat /workspace/.env | xargs)
+```
+
+Then access via `Sys.getenv("CENSUS_API_KEY")`.
+
 ## old/ Directory
 
 Contains the entire original project as it was before reorganization. All original R scripts, data files, PDFs, Quarto documents, images, and exploratory code are preserved here unchanged.

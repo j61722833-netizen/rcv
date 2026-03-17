@@ -1,0 +1,262 @@
+---
+title: "RCV Ballot Measure Models"
+author: "Jesse Brandt"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(lme4)
+library(scales)
+library(broom)
+library(broom.mixed)
+library(knitr)
+
+load("../data/rcv_data.RData")
+```
+
+## Data Preparation
+
+The cleaning pipeline (`R/01_clean_and_merge.R`) now produces unified
+`rcv_yes` and `rcv_no` columns across all 8 locales.
+
+```{r prep}
+df <- states_and_cities %>%
+  filter(!is.na(rcv_yes), !is.na(rcv_no), !is.na(dem_share),
+         (rcv_yes + rcv_no) > 0) %>%
+  mutate(
+    n_votes   = rcv_yes + rcv_no,
+    recent_lpw = factor(recent_lpw, levels = c(FALSE, TRUE),
+                        labels = c("No", "Yes"))
+  )
+
+df %>%
+  group_by(locale, rcv_jurisdiction, recent_lpw) %>%
+  summarise(n_precincts = n(), total_votes = sum(n_votes),
+            mean_yes = mean(yes_share), .groups = "drop") %>%
+  kable(digits = 3)
+```
+
+## 1 -- Binomial GLM (pooled)
+
+A binomial GLM with a logit link uses the actual vote counts as the response,
+properly accounting for the bounded [0, 1] nature of `yes_share` and
+giving more weight to precincts with more voters.
+
+```{r glm-binomial}
+m_binom <- glm(
+  cbind(rcv_yes, rcv_no) ~ dem_share + recent_lpw,
+  family = binomial(link = "logit"),
+  data = df
+)
+
+summary(m_binom)
+```
+
+The deviance-to-df ratio measures overdispersion (>>1 means the binomial
+variance assumption is too tight -- common with aggregate vote data).
+
+```{r overdispersion}
+cat("Residual deviance / df:",
+    round(deviance(m_binom) / df.residual(m_binom), 1), "\n")
+```
+
+Overdispersion is expected: precinct vote shares vary more than pure binomial
+sampling because voters within a precinct are not independent coin flips.
+A **quasibinomial** model uses the same point estimates but corrects the
+standard errors.
+
+```{r glm-quasi}
+m_quasi <- glm(
+  cbind(rcv_yes, rcv_no) ~ dem_share + recent_lpw,
+  family = quasibinomial(link = "logit"),
+  data = df
+)
+
+tidy(m_quasi, conf.int = TRUE) %>%
+  kable(digits = 4, caption = "Quasibinomial GLM: yes ~ dem_share + recent_lpw")
+```
+
+### Adding the interaction (dem_share x recent_lpw)
+
+Does the effect of partisanship on RCV support differ in locales with a
+recent low-plurality winner?
+
+```{r glm-interaction}
+m_quasi_int <- glm(
+  cbind(rcv_yes, rcv_no) ~ dem_share * recent_lpw,
+  family = quasibinomial(link = "logit"),
+  data = df
+)
+
+tidy(m_quasi_int, conf.int = TRUE) %>%
+  kable(digits = 4,
+        caption = "Quasibinomial GLM with interaction")
+```
+
+```{r glm-compare}
+anova(m_quasi, m_quasi_int, test = "F")
+```
+
+### Marginal effects plot
+
+```{r glm-fitted, fig.width=8, fig.height=5}
+pred_grid <- expand.grid(
+  dem_share  = seq(0, 1, length.out = 200),
+  recent_lpw = factor(c("No", "Yes"))
+)
+
+pred_grid$fit <- predict(m_quasi_int, newdata = pred_grid, type = "response")
+
+ggplot() +
+  geom_point(data = df,
+             aes(x = dem_share, y = yes_share, color = recent_lpw),
+             alpha = 0.3, size = 0.8) +
+  geom_line(data = pred_grid,
+            aes(x = dem_share, y = fit, color = recent_lpw),
+            linewidth = 1.2) +
+  scale_x_continuous(labels = percent_format(1)) +
+  scale_y_continuous(labels = percent_format(1), limits = c(0, 1)) +
+  scale_color_manual(values = c("No" = "#4575B4", "Yes" = "#D73027")) +
+  labs(x = "Democratic Presidential Vote Share",
+       y = "RCV Yes Vote Share",
+       color = "Recent low-\nplurality winner",
+       title = "Quasibinomial GLM with interaction") +
+  theme_bw(base_size = 13)
+```
+
+## 2 -- Mixed-effects binomial model (random intercepts by locale)
+
+Precincts are nested within locales that differ in unobserved ways
+(campaign spending, ballot language, media environment). A random-intercept
+model accounts for this clustering.
+
+```{r glmer-ri}
+m_glmer <- glmer(
+  cbind(rcv_yes, rcv_no) ~ dem_share + recent_lpw + (1 | locale),
+  family = binomial,
+  data = df,
+  nAGQ = 10
+)
+
+summary(m_glmer)
+```
+
+```{r glmer-ri-table}
+tidy(m_glmer, conf.int = TRUE, effects = "fixed") %>%
+  kable(digits = 4, caption = "GLMM: random intercept by locale")
+```
+
+Random-intercept estimates (locale-level deviations on the log-odds scale):
+
+```{r ranef}
+ranef(m_glmer)$locale %>%
+  tibble::rownames_to_column("locale") %>%
+  rename(intercept_shift = `(Intercept)`) %>%
+  arrange(desc(intercept_shift)) %>%
+  kable(digits = 3)
+```
+
+### With interaction
+
+```{r glmer-int}
+m_glmer_int <- glmer(
+  cbind(rcv_yes, rcv_no) ~ dem_share * recent_lpw + (1 | locale),
+  family = binomial,
+  data = df,
+  nAGQ = 10
+)
+
+tidy(m_glmer_int, conf.int = TRUE, effects = "fixed") %>%
+  kable(digits = 4,
+        caption = "GLMM with interaction + random intercept")
+```
+
+```{r glmer-compare}
+anova(m_glmer, m_glmer_int)
+```
+
+### Random slopes
+
+Does the effect of `dem_share` vary by locale? Adding a random slope
+lets each locale have its own partisan gradient.
+
+```{r glmer-rs}
+m_glmer_rs <- glmer(
+  cbind(rcv_yes, rcv_no) ~ dem_share * recent_lpw + (1 + dem_share | locale),
+  family = binomial,
+  data = df,
+  nAGQ = 1   # Laplace; nAGQ > 1 not supported with random slopes
+)
+
+summary(m_glmer_rs)
+```
+
+```{r glmer-rs-ranef}
+coef(m_glmer_rs)$locale %>%
+  tibble::rownames_to_column("locale") %>%
+  kable(digits = 4, caption = "Locale-specific coefficients (random slopes)")
+```
+
+### Fitted curves from the random-slopes model
+
+```{r glmer-rs-plot, fig.width=9, fig.height=6}
+locale_coefs <- coef(m_glmer_rs)$locale %>%
+  tibble::rownames_to_column("locale")
+
+locale_meta <- df %>%
+  distinct(locale, recent_lpw)
+
+pred_rs <- locale_coefs %>%
+  left_join(locale_meta, by = "locale") %>%
+  tidyr::crossing(dem_share_grid = seq(0, 1, length.out = 200)) %>%
+  mutate(
+    lpw_val = ifelse(recent_lpw == "Yes", 1, 0),
+    eta = `(Intercept)` + dem_share * dem_share_grid +
+          `recent_lpwYes` * lpw_val +
+          `dem_share:recent_lpwYes` * dem_share_grid * lpw_val,
+    fitted = plogis(eta)
+  )
+
+ggplot() +
+  geom_point(data = df,
+             aes(x = dem_share, y = yes_share, color = locale),
+             alpha = 0.25, size = 0.7) +
+  geom_line(data = pred_rs,
+            aes(x = dem_share_grid, y = fitted, color = locale),
+            linewidth = 1) +
+  scale_x_continuous(labels = percent_format(1)) +
+  scale_y_continuous(labels = percent_format(1), limits = c(0, 1)) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Democratic Presidential Vote Share",
+       y = "RCV Yes Vote Share",
+       color = "Locale",
+       title = "Mixed-effects binomial model (random slopes by locale)") +
+  theme_bw(base_size = 13)
+```
+
+## 3 -- Model comparison summary
+
+AIC is undefined for quasibinomial models, so the comparison below includes
+only the GLMM fits (which have proper likelihoods). The quasibinomial models
+are compared via the F-test above.
+
+```{r comparison}
+models <- tibble(
+  Model = c(
+    "GLMM random intercept",
+    "GLMM random intercept + interaction",
+    "GLMM random slopes + interaction"
+  ),
+  AIC = c(AIC(m_glmer), AIC(m_glmer_int), AIC(m_glmer_rs))
+)
+
+models %>%
+  mutate(AIC = format(round(AIC), big.mark = ",")) %>%
+  kable(caption = "AIC comparison (lower is better)")
+```
