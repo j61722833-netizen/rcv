@@ -20,9 +20,8 @@ library(stringr)
 options(tigris_use_cache = TRUE)
 
 # --- API key setup ---
-env_lines <- readLines("/workspace/.env")
-census_key <- sub("CENSUS_API_KEY=", "", env_lines[grepl("^CENSUS_API_KEY=", env_lines)])
-Sys.setenv(CENSUS_API_KEY = trimws(census_key))
+stopifnot("Set CENSUS_API_KEY env var before running (e.g. in ~/.Renviron)" =
+            nzchar(Sys.getenv("CENSUS_API_KEY")))
 
 # --- Load base data ---
 load("data/rcv_data.RData")

@@ -77,6 +77,9 @@ ak_m2 <- ak_results %>%
   rename(ak_rcv_race = race, ak_rcv_yes = YES, ak_rcv_no = NO)
 
 ak_combine <- right_join(ak_m2, ak_pres, by = "district") %>%
+  # Remove the overseas absentee pseudo-precinct — it is an artifact of
+  # absentee vote counting, not a geographic precinct.
+  filter(!grepl("Fed Overseas", district, ignore.case = TRUE)) %>%
   mutate(
     rcv_yes          = as.double(ak_rcv_yes),
     rcv_no           = as.double(ak_rcv_no),
@@ -188,8 +191,8 @@ mass_combine <- inner_join(mass_pres, mass_rcv, by = "precinct") %>%
 #   Question.2..Citizen.Initiative, X.4, X.5  = Q2 YES / NO / BLANK
 #   Question.3..Citizen.Initiative, X.6, X.7  = Q3 YES / NO / BLANK
 #   Question.4..Citizen.Initiative, X.8, X.9  = Q4 YES / NO / BLANK
-#   Question.5..Citizen.Initiative, X.10, X.11 = Q5 YES / NO / BLANK  [RCV measure]
-#   Question.6...Bond.Issue,        X.12, X.13 = Q6 YES / NO / BLANK
+#   Question.5..Citizen.Initiative, X.11, X.12 = Q5 YES / NO / BLANK  [RCV measure]
+#   Question.6...Bond.Issue,        X.13, X.14 = Q6 YES / NO / BLANK
 #   Total.Ballots.Cast
 #
 # maine_pres_2016.csv inferred column layout (first column may have a BOM marker,
@@ -381,9 +384,14 @@ albany_pres <- albany %>%
     pres_vbm_under  = Vote.by.Mail_under_votes,
     pres_vbm_over   = Vote.by.Mail_over_votes
   ) %>%
-  # Use contested votes (Biden + Trump + third-party) as denominator,
-  # excluding under/overvotes, for cross-locale consistency.
-  mutate(biden_share = pres_biden / (pres_total - pres_under - pres_over))
+  # Sum all named candidate vote columns as the denominator, consistent with
+  # how other locales compute dem_share. The old formula (pres_total - under -
+  # over) included qualified write-ins not listed as named candidates, producing
+  # a denominator 0–35 votes larger per precinct and slightly deflating biden_share.
+  mutate(
+    pres_all_candidates = rowSums(across(ends_with("_total_votes"))),
+    biden_share = pres_biden / pres_all_candidates
+  )
 
 # Join measure and presidential data on precinct name.
 # Precinct-level metadata (Reg_voters, Turn_Out, etc.) is identical in both
@@ -640,6 +648,13 @@ locales <- list(ak_combine, mass_combine, maine_combine, albany_combine,
 locales <- lapply(locales, coerce_numeric_cols)
 
 states_and_cities <- bind_rows(locales)
+
+# Remove precincts with zero votes in both YES and NO (produces NaN via 0/0).
+# Affected: 1 Alaska (Clark's Point) and 3 Eureka precincts with no ballots cast.
+n_nan <- sum(is.nan(states_and_cities$yes_share), na.rm = TRUE)
+if (n_nan > 0) cat("Dropping", n_nan, "precincts with NaN yes_share (zero votes)\n")
+states_and_cities <- states_and_cities %>%
+  filter(!is.nan(yes_share) | is.na(yes_share))
 
 # ============================================================================
 # --- MERGE recent_lpw ---

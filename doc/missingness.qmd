@@ -157,7 +157,7 @@ eureka_measure <- read.csv("../data/raw/eureka_rcv_2020.csv") %>%
 
 eureka_pres <- read.csv("../data/raw/humboldt_pres_2020.csv") %>%
   select(svprec, total_votes = TOTVOTE, biden = PRSDEM01, trump = PRSREP01) %>%
-  mutate(precinct = gsub("_A", "", svprec)) %>%
+  mutate(precinct = sub("_A$", "", svprec)) %>%
   group_by(precinct) %>%
   summarize(across(c(2:4), sum))
 

@@ -108,7 +108,7 @@ anova(m_quasi, m_quasi_int, test = "F")
 ```{r glm-fitted, fig.width=8, fig.height=5}
 pred_grid <- expand.grid(
   dem_share  = seq(0, 1, length.out = 200),
-  recent_lpw = factor(c("No", "Yes"))
+  recent_lpw = factor(c("No", "Yes"), levels = c("No", "Yes"))
 )
 
 pred_grid$fit <- predict(m_quasi_int, newdata = pred_grid, type = "response")

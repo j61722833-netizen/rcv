@@ -116,8 +116,13 @@ for (v in vars_to_impute) {
 states_and_cities_imputed <- states_and_cities_census
 
 for (v in vars_to_impute) {
-  na_mask <- is.na(states_and_cities_imputed[[v]])
-  states_and_cities_imputed[[v]][na_mask] <- imp_complete[[v]][na_mask]
+  # imp_complete has nrow(imp_df) rows (dem_share-complete subset), indexed 1:N.
+  # states_and_cities_imputed has the full dataset. analysis_rows maps each
+  # imp_complete row back to the correct full-dataset position.
+  full_na_idx <- which(is.na(states_and_cities_imputed[[v]]) &
+                         seq_len(nrow(states_and_cities_imputed)) %in% analysis_rows)
+  imp_positions <- match(full_na_idx, analysis_rows)
+  states_and_cities_imputed[[v]][full_na_idx] <- imp_complete[[v]][imp_positions]
 }
 
 cat("\n=== Final dataset summary ===\n")
