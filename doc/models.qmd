@@ -1,7 +1,6 @@
 ---
 title: "RCV Ballot Measure Models"
 author: "Jesse Brandt"
-format: html
 execute:
   echo: true
   warning: false

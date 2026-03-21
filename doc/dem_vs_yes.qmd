@@ -1,7 +1,9 @@
 ---
 title: "Democratic Share vs. RCV Yes Share by Locale"
 author: "Jesse Brandt"
-format: html
+format:
+  html:
+    embed-resources: true
 execute:
   echo: false
   warning: false

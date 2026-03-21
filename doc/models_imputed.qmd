@@ -1,7 +1,6 @@
 ---
 title: "RCV Models with Demographic Controls (Imputed Data)"
 author: "Jesse Brandt"
-format: html
 execute:
   echo: true
   warning: false
@@ -31,9 +30,9 @@ Imputation excluded all RCV outcome variables.
 
 **Models:**
 
-- **M1**: Quasibinomial baseline — `dem_share + recent_lpw` only
-- **M2**: Quasibinomial + demographic controls
-- **M3**: GLMM with random intercept by locale + controls
+- **M1**: Quasibinomial baseline — `dem_share * recent_lpw` (with interaction)
+- **M2**: Quasibinomial + demographic controls (with interaction)
+- **M3**: GLMM with random intercept by locale + controls (with interaction)
 
 **Demographic controls** (PL94-171 + ACS 5-year):
 `pct_white_vap`, `pct_black_vap`, `pct_hispanic_vap`, `median_income`, `pct_bach_plus`, `pct_renter`
@@ -57,7 +56,7 @@ diag_data %>%
 
 ## Model 1: Quasibinomial baseline
 
-$$\text{logit}(p) = \beta_0 + \beta_1 \cdot \text{dem\_share} + \beta_2 \cdot \text{recent\_lpw}$$
+$$\text{logit}(p) = \beta_0 + \beta_1 \cdot \text{dem\_share} + \beta_2 \cdot \text{recent\_lpw} + \beta_3 \cdot \text{dem\_share} \times \text{recent\_lpw}$$
 
 ```{r m1}
 summary(pool_m1) %>%
@@ -66,7 +65,7 @@ summary(pool_m1) %>%
 
 ## Model 2: Quasibinomial with demographic controls
 
-$$\text{logit}(p) = \beta_0 + \beta_1 \cdot \text{dem\_share} + \beta_2 \cdot \text{recent\_lpw} + \boldsymbol{\gamma} \cdot \mathbf{X}_{\text{demo}}$$
+$$\text{logit}(p) = \beta_0 + \beta_1 \cdot \text{dem\_share} + \beta_2 \cdot \text{recent\_lpw} + \beta_3 \cdot \text{dem\_share} \times \text{recent\_lpw} + \boldsymbol{\gamma} \cdot \mathbf{X}_{\text{demo}}$$
 
 ```{r m2}
 summary(pool_m2) %>%
@@ -184,6 +183,7 @@ coefs <- bind_rows(
     term = case_match(term,
       "dem_share" ~ "Dem. vote share",
       "recent_lpw" ~ "Recent LPW (=TRUE)",
+      "dem_share:recent_lpw" ~ "Dem share x LPW",
       "pct_white_vap" ~ "% White VAP",
       "pct_black_vap" ~ "% Black VAP",
       "pct_hispanic_vap" ~ "% Hispanic VAP",
@@ -220,6 +220,7 @@ coefs_all <- bind_rows(
     term = case_match(term,
       "dem_share" ~ "Dem. vote share",
       "recent_lpw" ~ "Recent LPW (=TRUE)",
+      "dem_share:recent_lpw" ~ "Dem share x LPW",
       "pct_white_vap" ~ "% White VAP",
       "pct_black_vap" ~ "% Black VAP",
       "pct_hispanic_vap" ~ "% Hispanic VAP",

@@ -19,7 +19,7 @@ Precinct-level analysis of voter support for Ranked-Choice Voting (RCV) ballot m
 
 ## Data Pipeline
 
-The pipeline has three stages, each in `R/`:
+The pipeline has four stages, each in `R/`:
 
 ### 1. `R/01_clean_and_merge.R` — Clean and merge election data
 
@@ -45,6 +45,10 @@ Matching strategies vary by locale: GEOID join (MN), name matching with fuzzy fa
 
 Uses `mice` (predictive mean matching, 5 imputations, 20 iterations) to impute remaining missing Census values. The imputation model **excludes all RCV outcome variables** (`yes_share`, `rcv_yes`, etc.) to prevent leaking the dependent variable into imputed predictors.
 
+### 4. `R/04_models.R` — Fit models on imputed data
+
+Fits GLM/GLMM models on the multiply-imputed data and pools results across all 5 imputations using `mice::pool()`.
+
 ## Output Files
 
 | File                          | Description                                              |
@@ -53,6 +57,7 @@ Uses `mice` (predictive mean matching, 5 imputations, 20 iterations) to impute r
 | `data/rcv_data_census.RData`  | + Census demographics (observed only)                    |
 | `data/rcv_data_imputed.RData` | + Imputed demographics (single completed dataset)        |
 | `data/rcv_data_mids.RData`    | `mice` mids object (5 imputations, for pooled inference) |
+| `data/model_results.RData`    | Pooled model results from `04_models.R`                  |
 
 ## Key Findings
 
@@ -68,13 +73,19 @@ Uses `mice` (predictive mean matching, 5 imputations, 20 iterations) to impute r
 
 ## Reports
 
-| File | Description |
-| ---- | ----------- |
-| `old/RCV_Paper.qmd` | Main research paper (renders to PDF) |
-| `old/RCV_Blog_Post.qmd` | Interactive blog post (renders to HTML with plotly) |
-| `old/RCV_Limited_Results.qmd` | Shortened results summary (PDF) |
+Quarto source files live in `doc/`; rendered PDFs go to `reports/` (viewable directly on GitHub). Render all reports with `quarto render doc/`.
 
-Render with `quarto render <file>`.
+| Report | Description |
+| ------ | ----------- |
+| [Dem Share vs. RCV Support](reports/dem_vs_yes.html) | Interactive scatterplots (HTML — uses plotly) |
+| [Model Results](reports/models.pdf) | Models on original data |
+| [Model Results — Imputed](reports/models_imputed.pdf) | Models on multiply-imputed data |
+| [Diagnostics](reports/diagnostics.pdf) | Regression diagnostics |
+| [Missingness](reports/missingness.pdf) | Missing data patterns |
+| [LPW Data Sources](reports/lpw_data_sources.pdf) | Low Plurality Winner data sources |
+| [Caveats](reports/caveats.pdf) | Methodological caveats and limitations |
+
+Legacy documents (paper, blog post) are in `old/`.
 
 ## Setup
 
@@ -88,4 +99,5 @@ To reproduce the analysis from scratch:
 Rscript R/01_clean_and_merge.R
 Rscript R/02_census_api.R
 Rscript R/03_imputation.R
+Rscript R/04_models.R
 ```

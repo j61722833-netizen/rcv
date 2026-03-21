@@ -5,6 +5,4 @@
 old/
 .env
 
-# Rendered Quarto output (regenerate from .qmd sources)
-doc/*_files/
-doc/*.html
+

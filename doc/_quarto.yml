@@ -1,0 +1,7 @@
+project:
+  output-dir: ../reports
+
+format:
+  pdf:
+    documentclass: article
+    geometry: margin=1in

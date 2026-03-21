@@ -7,8 +7,8 @@
 # Output: data/model_results.RData
 #
 # Models:
-#   m1: cbind(rcv_yes, rcv_no) ~ dem_share + recent_lpw      (quasibinom baseline)
-#   m2: cbind(rcv_yes, rcv_no) ~ dem_share + recent_lpw + X  (quasibinom + controls)
+#   m1: cbind(rcv_yes, rcv_no) ~ dem_share * recent_lpw       (quasibinom baseline)
+#   m2: cbind(rcv_yes, rcv_no) ~ dem_share * recent_lpw + X  (quasibinom + controls)
 #   m3: cbind(rcv_yes, rcv_no) ~ ... + (1 | locale)          (GLMM + controls)
 
 library(mice)
@@ -41,7 +41,8 @@ filter_analysis <- function(d) {
     filter(!is.na(yes_share), !is.na(dem_share),
            !is.na(rcv_yes), !is.na(rcv_no),
            (rcv_yes + rcv_no) > 0) %>%
-    mutate(n_votes = rcv_yes + rcv_no)
+    mutate(n_votes = rcv_yes + rcv_no,
+           median_income = median_income / 10000)  # scale to ~$10k units
 }
 
 demo_controls <- "pct_white_vap + pct_black_vap + pct_hispanic_vap + median_income + pct_bach_plus + pct_renter"
@@ -55,7 +56,7 @@ cat("=== Fitting models across", mids$m, "imputations ===\n\n")
 cat("--- M1: Quasibinomial baseline ---\n")
 fit_m1_list <- lapply(1:mids$m, function(i) {
   d <- filter_analysis(complete(full_mids, i))
-  glm(cbind(rcv_yes, rcv_no) ~ dem_share + recent_lpw,
+  glm(cbind(rcv_yes, rcv_no) ~ dem_share * recent_lpw,
       family = quasibinomial(link = "logit"), data = d)
 })
 fit_m1 <- list(analyses = fit_m1_list)
@@ -69,7 +70,7 @@ pool_m1 <- pool(fit_m1)
 cat("--- M2: Quasibinomial + demographic controls ---\n")
 fit_m2_list <- lapply(1:mids$m, function(i) {
   d <- filter_analysis(complete(full_mids, i))
-  glm(as.formula(paste("cbind(rcv_yes, rcv_no) ~ dem_share + recent_lpw +", demo_controls)),
+  glm(as.formula(paste("cbind(rcv_yes, rcv_no) ~ dem_share * recent_lpw +", demo_controls)),
       family = quasibinomial(link = "logit"), data = d)
 })
 fit_m2 <- list(analyses = fit_m2_list)
@@ -84,12 +85,12 @@ cat("--- M3: GLMM (random intercept by locale) + controls ---\n")
 fit_m3_list <- lapply(1:mids$m, function(i) {
   d <- filter_analysis(complete(full_mids, i))
   glmer(
-    as.formula(paste("cbind(rcv_yes, rcv_no) ~ dem_share + recent_lpw +",
+    as.formula(paste("cbind(rcv_yes, rcv_no) ~ dem_share * recent_lpw +",
                      demo_controls, "+ (1 | locale)")),
     family = binomial,
     data = d,
-    nAGQ = 10,
-    control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 50000))
+    nAGQ = 1,
+    control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000))
   )
 })
 fit_m3 <- list(analyses = fit_m3_list)

@@ -20,53 +20,79 @@ rcv/
 ├── rcv.Rproj              # RStudio project file
 ├── CLAUDE.md              # This file
 ├── R/
-│   └── 01_clean_and_merge.R   # Consolidated data cleaning script
+│   ├── 01_clean_and_merge.R   # Clean raw data, merge locales → states_and_cities
+│   ├── 02_census_api.R        # Enrich with Census demographics (PL94-171 + ACS)
+│   ├── 03_imputation.R        # Multiple imputation of missing demographics (mice)
+│   └── 04_models.R            # GLM/GLMM models on multiply-imputed data
 ├── data/
-│   └── raw/               # Source CSV/txt data files
-├── output/                # Rendered documents, plots
-├── doc/                   # Quarto documents (future)
+│   ├── raw/               # Source CSV/txt data files
+│   └── *.RData, *.csv     # Intermediate and final processed datasets
+├── doc/                   # Quarto reports (source .qmd + rendered HTML)
+│   ├── dem_vs_yes.qmd     # Dem share vs. RCV support scatterplots
+│   ├── models.qmd         # Model results (original data)
+│   ├── models_imputed.qmd # Model results (imputed data)
+│   ├── diagnostics.qmd    # Model diagnostics
+│   ├── missingness.qmd    # Missing data patterns
+│   ├── lpw_data_sources.qmd  # Low Plurality Winner data sources
+│   └── caveats.qmd        # Study caveats and limitations
+├── output/                # (empty, intended for separated rendered output)
 └── old/                   # Original flat directory (preserved as-is)
 ```
 
 ## Data Pipeline
 
-### Single cleaning script: `R/01_clean_and_merge.R`
+Run scripts sequentially from the project root:
 
-Reads raw data from `data/raw/`, cleans and merges all locales, and produces the `states_and_cities` dataframe.
+```r
+source("R/01_clean_and_merge.R")  # → data/rcv_data.RData, data/states_and_cities.csv
+source("R/02_census_api.R")       # → data/rcv_data_census.RData (needs CENSUS_API_KEY)
+source("R/03_imputation.R")       # → data/rcv_data_imputed.RData, data/rcv_data_mids.RData
+source("R/04_models.R")           # → data/model_results.RData
+```
+
+### 01: Clean and merge (`R/01_clean_and_merge.R`)
+
+Reads raw data from `data/raw/`, cleans and merges all locales into the `states_and_cities` dataframe.
 
 Locales processed:
-- **Alaska 2020** — Ballot Measure No. 2 + U.S. President (`resultsbyprecinct_alaska.txt`)
-- **Massachusetts 2020** — Question 2 + U.S. President (`mass_measure_precincts.csv`, `mass_president_precincts.csv`)
-- **Maine 2016** — Question 5 + U.S. President (`maine_president_2016.csv`, `maine_referendum16.csv`)
-- **Albany CA** — Measure BB + President (`albany_precincts.csv`)
-- **Bloomington MN** — RCV measure + President (`bloomington_rcv.csv`, `mn_pres.csv`)
-- **Boulder CO** — Question 2E + President (`boulder_rcv_pres.csv`)
-- **Eureka CA** — RCV measure + President (`eureka_rcv.csv`, `humboldt_pres.csv`)
-- **Minnetonka MN** — RCV measure + President (`minnetonka_rcv.csv`, `mn_pres.csv`)
+- **Alaska 2020** — Ballot Measure No. 2 + U.S. President
+- **Massachusetts 2020** — Question 2 + U.S. President
+- **Maine 2016** — Question 5 + U.S. President
+- **Albany CA, Bloomington MN, Boulder CO, Eureka CA, Minnetonka MN** — local RCV measures + President
 
-Run from the project root:
-```r
-source("R/01_clean_and_merge.R")
-```
+### 02: Census enrichment (`R/02_census_api.R`)
 
-### Output dataframe: `states_and_cities`
-- `dem_share` — Democratic presidential candidate vote share at precinct level
+Pulls PL94-171 redistricting data and ACS 5-year estimates via Census API. Joins demographics to precincts using geographic crosswalks.
+
+### 03: Imputation (`R/03_imputation.R`)
+
+Multiple imputation of missing Census demographics using `mice`. Produces both a single imputed dataset and the full `mids` object for pooled analysis.
+
+### 04: Models (`R/04_models.R`)
+
+Fits GLM/GLMM models on multiply-imputed data. Pools results across 5 imputations using `mice::pool()`.
+
+### Key output variables
+- `dem_share` — Democratic presidential vote share at precinct level
 - `yes_share` — RCV ballot measure "Yes" vote share at precinct level
 - `place` — Locale name (Alaska, Massachusetts, Maine, Albany, Bloomington, Boulder, Eureka, Minnetonka)
+- `recent_lpw` — Whether the locale had a recent Low Plurality Winner
 
-### Quarto documents (in `old/`, to be moved to `doc/` later)
+## Quarto Reports
+
+Reports live in `doc/` and render to HTML in the same directory:
+
 ```bash
-quarto render old/RCV_Paper.qmd          # Main paper (PDF)
-quarto render old/RCV_Blog_Post.qmd      # Blog post (HTML, plotly)
-quarto render old/RCV_Limited_Results.qmd # Shortened results (PDF)
+quarto render doc/dem_vs_yes.qmd       # Dem share vs. RCV support plots
+quarto render doc/models.qmd           # Model results (original data)
+quarto render doc/models_imputed.qmd   # Model results (imputed data)
+quarto render doc/diagnostics.qmd      # Model diagnostics
+quarto render doc/missingness.qmd      # Missing data patterns
+quarto render doc/lpw_data_sources.qmd # LPW data sources
+quarto render doc/caveats.qmd          # Study caveats
 ```
 
-All Quarto documents load `old/rcv_data.RData` which contains the pre-processed `states_and_cities` dataframe.
-
-### Key Variable Names
-- `dem_share` / `biden_share` / `clinton_share` — Democratic presidential candidate vote share at precinct level
-- `yes_share` / `rcv_share` — RCV ballot measure "Yes" vote share at precinct level
-- `recent_lpw` — Boolean: whether the locale had a recent Low Plurality Winner (Alaska and Maine = TRUE)
+Legacy Quarto documents (paper, blog post) remain in `old/` and load `old/rcv_data.RData`.
 
 ## Key Findings (for context when editing)
 

@@ -1,7 +1,6 @@
 ---
 title: "Low Plurality Winner (LPW) Data Sources"
 author: "Jesse Brandt"
-format: html
 execute:
   echo: true
   warning: false

@@ -1,6 +1,5 @@
 ---
 title: "RCV Data Missingness Audit"
-format: html
 ---
 
 ```{r setup, message=FALSE}
@@ -103,20 +102,22 @@ if (nrow(rcv_only) > 0) {
 ## Maine 2016
 
 ```{r maine}
-maine_pres <- read.csv("../data/raw/maine_pres_2016.csv")
-maine_ref <- read.csv("../data/raw/maine_rcv_2016.csv")
+maine_pres <- read.csv("../data/raw/maine_pres_2016.csv", fileEncoding = "UTF-8-BOM")
+maine_ref <- read.csv("../data/raw/maine_rcv_2016.csv", fileEncoding = "UTF-8-BOM")
 
+# Use positional indexing (col names vary with BOM)
+names(maine_ref)[c(1, 3, 16, 17, 18)] <- c("county", "dist", "rcv_yes", "rcv_no", "rcv_blank")
 maine_ref <- maine_ref %>%
-  filter(X != "", X != "CTY") %>%
-  select(county = X, dist = X.1, rcv_yes = Question.5..Citizen.Initiative,
-         rcv_no = X.10, rcv_blank = X.11) %>%
+  filter(county != "", county != "CTY") %>%
+  select(county, dist, rcv_yes, rcv_no, rcv_blank) %>%
   filter(dist != "MUNICIPALITY") %>%
   mutate(across(rcv_yes:rcv_blank, parse_number)) %>%
   mutate(rcv_share = rcv_yes / (rcv_yes + rcv_no))
 
+names(maine_pres)[1:2] <- c("county", "dist")
 maine_pres <- maine_pres %>%
-  filter(X != "", X != "CTY") %>%
-  select(county = X..., dist = X, clinton = Clinton..Hillary.R., total = TBC) %>%
+  filter(county != "", county != "CTY") %>%
+  select(county, dist, clinton = Clinton..Hillary.R., total = TBC) %>%
   filter(dist != "Town") %>%
   mutate(across(clinton:total, parse_number)) %>%
   mutate(clinton_share = clinton / total)
@@ -149,7 +150,6 @@ if (nrow(ref_only) > 0) {
 
 ```{r eureka}
 eureka_measure <- read.csv("../data/raw/eureka_rcv_2020.csv") %>%
-  rename(Precinct = X...Precinct) %>%
   filter(Precinct != "Totals") %>%
   select(precinct = Precinct, Yes, No, Total.Ballots.Cast) %>%
   mutate(across(c(2:4), parse_number)) %>%
@@ -180,10 +180,10 @@ print(nan_rows)
 ```{r other-cities}
 # These use left_join which keeps all LHS rows — just check for NAs
 mn_pres <- read.csv("../data/raw/minnesota_pres_2020.csv") %>%
-  rename(precinct = PCTNAME, VTDID = X...VTDID)
+  rename(precinct = PCTNAME)
 
 bloomington_measure <- read.csv("../data/raw/bloomington_rcv_2020.csv") %>%
-  rename(precinct = X...County..Precinct) %>%
+  rename(precinct = County..Precinct) %>%
   filter(precinct != "Candidate Totals:") %>%
   mutate(precinct = gsub("Hennepin: ", "", precinct))
 bloomington_both <- left_join(bloomington_measure, mn_pres, by = "precinct")
@@ -192,7 +192,7 @@ cat("Bloomington: RCV precincts:", nrow(bloomington_measure),
     "| Unmatched:", sum(is.na(bloomington_both$TOTVOTING)), "\n")
 
 minnetonka_measure <- read.csv("../data/raw/minnetonka_rcv_2020.csv") %>%
-  rename(precinct = X...County..Precinct) %>%
+  rename(precinct = County..Precinct) %>%
   filter(precinct != "Candidate Totals:") %>%
   mutate(precinct = gsub("Hennepin: ", "", precinct))
 minnetonka_both <- left_join(minnetonka_measure, mn_pres, by = "precinct")
@@ -200,8 +200,7 @@ cat("Minnetonka: RCV precincts:", nrow(minnetonka_measure),
     "| After join:", nrow(minnetonka_both),
     "| Unmatched:", sum(is.na(minnetonka_both$TOTVOTING)), "\n")
 
-albany <- read.csv("../data/raw/albany_all_results_2020.csv") %>%
-  rename(Precinct_name = X...Precinct_name)
+albany <- read.csv("../data/raw/albany_all_results_2020.csv")
 albany_m <- albany %>% filter(Contest_title == "Measure BB - City of Albany") %>%
   select(Precinct_name) %>% distinct()
 albany_p <- albany %>% filter(Contest_title == "President and Vice President") %>%
@@ -210,8 +209,7 @@ cat("Albany: Measure precincts:", nrow(albany_m),
     "| Pres precincts:", nrow(albany_p),
     "| Unmatched:", sum(!albany_m$Precinct_name %in% albany_p$Precinct_name), "\n")
 
-boulder <- read.csv("../data/raw/boulder_all_results_2020.csv") %>%
-  rename(Precinct.Name.Short = X...Precinct.Name..Short.)
+boulder <- read.csv("../data/raw/boulder_all_results_2020.csv")
 boulder_r <- boulder %>% filter(Contest.Name == "City of Boulder Ballot Question 2E") %>%
   select(Precinct.Name) %>% distinct()
 boulder_p <- boulder %>% filter(Contest.Name == "Presidential Electors") %>%
