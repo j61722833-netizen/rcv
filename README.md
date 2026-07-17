@@ -49,6 +49,10 @@ Uses `mice` (predictive mean matching, 5 imputations, 20 iterations) to impute r
 
 Fits GLM/GLMM models on the multiply-imputed data and pools results across all 5 imputations using `mice::pool()`.
 
+### 5. `R/05_cv.R` — Out-of-sample cross-validation
+
+Evaluates the models with **leave-one-locale-out** cross-validation: each of the 8 locales is held out in turn and predicted from the other seven. This respects the precinct-within-locale clustering (a naive random split would leak locale effects). For the baseline model the CV is fully imputation-free; for the demographic models the `mice` imputation is refit *inside each training fold* (via `ignore=`) so no held-out information leaks into the imputed predictors. Reports out-of-sample deviance-explained and MAE of predicted support share, pooled across the 5 imputations. Writes `data/cv_results.RData`, `data/cv_metrics.csv`, and `data/cv_fold_metrics.csv`.
+
 ## Output Files
 
 | File                          | Description                                              |
@@ -58,6 +62,9 @@ Fits GLM/GLMM models on the multiply-imputed data and pools results across all 5
 | `data/rcv_data_imputed.RData` | + Imputed demographics (single completed dataset)        |
 | `data/rcv_data_mids.RData`    | `mice` mids object (5 imputations, for pooled inference) |
 | `data/model_results.RData`    | Pooled model results from `04_models.R`                  |
+| `data/cv_results.RData`       | Out-of-sample CV metrics + provenance from `05_cv.R`     |
+| `data/cv_metrics.csv`         | Pooled leave-one-locale-out metrics (citable)            |
+| `data/cv_fold_metrics.csv`    | Per-held-out-locale CV metrics                           |
 
 ## Key Findings
 
@@ -80,6 +87,7 @@ Quarto source files live in `doc/`; rendered PDFs go to `reports/` (viewable dir
 | [Dem Share vs. RCV Support](reports/dem_vs_yes.html) | Interactive scatterplots (HTML — uses plotly) |
 | [Model Results](reports/models.pdf) | Models on original data |
 | [Model Results — Imputed](reports/models_imputed.pdf) | Models on multiply-imputed data |
+| [Cross-Validation](reports/cv.pdf) | Out-of-sample (leave-one-locale-out) model evaluation |
 | [Diagnostics](reports/diagnostics.pdf) | Regression diagnostics |
 | [Missingness](reports/missingness.pdf) | Missing data patterns |
 | [LPW Data Sources](reports/lpw_data_sources.pdf) | Low Plurality Winner data sources |
@@ -100,4 +108,5 @@ Rscript R/01_clean_and_merge.R
 Rscript R/02_census_api.R
 Rscript R/03_imputation.R
 Rscript R/04_models.R
+Rscript R/05_cv.R
 ```
