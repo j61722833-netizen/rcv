@@ -23,7 +23,8 @@ rcv/
 │   ├── 01_clean_and_merge.R   # Clean raw data, merge locales → states_and_cities
 │   ├── 02_census_api.R        # Enrich with Census demographics (PL94-171 + ACS)
 │   ├── 03_imputation.R        # Multiple imputation of missing demographics (mice)
-│   └── 04_models.R            # GLM/GLMM models on multiply-imputed data
+│   ├── 04_models.R            # GLM/GLMM models on multiply-imputed data
+│   └── 05_cv.R                # Leave-one-locale-out out-of-sample CV of the models
 ├── data/
 │   ├── raw/               # Source CSV/txt data files
 │   └── *.RData, *.csv     # Intermediate and final processed datasets
@@ -48,6 +49,7 @@ source("R/01_clean_and_merge.R")  # → data/rcv_data.RData, data/states_and_cit
 source("R/02_census_api.R")       # → data/rcv_data_census.RData (needs CENSUS_API_KEY)
 source("R/03_imputation.R")       # → data/rcv_data_imputed.RData, data/rcv_data_mids.RData
 source("R/04_models.R")           # → data/model_results.RData
+source("R/05_cv.R")               # → data/cv_results.RData, data/cv_metrics.csv
 ```
 
 ### 01: Clean and merge (`R/01_clean_and_merge.R`)
@@ -72,6 +74,10 @@ Multiple imputation of missing Census demographics using `mice`. Produces both a
 
 Fits GLM/GLMM models on multiply-imputed data. Pools results across 5 imputations using `mice::pool()`.
 
+### 05: Cross-validation (`R/05_cv.R`)
+
+Leave-one-locale-out out-of-sample evaluation of the models. Each locale is held out and predicted from the rest, respecting the precinct-within-locale clustering. M1 (baseline) needs no demographics so its CV is imputation-free; M2/M3 refit the `mice` imputation inside each training fold (`ignore=`) to avoid leakage. Reports out-of-sample deviance-explained and MAE, pooled across imputations. **Jesse's rule: report CV numbers, not in-sample fit.**
+
 ### Key output variables
 - `dem_share` — Democratic presidential vote share at precinct level
 - `yes_share` — RCV ballot measure "Yes" vote share at precinct level
@@ -86,6 +92,7 @@ Reports live in `doc/` and render to HTML in the same directory:
 quarto render doc/dem_vs_yes.qmd       # Dem share vs. RCV support plots
 quarto render doc/models.qmd           # Model results (original data)
 quarto render doc/models_imputed.qmd   # Model results (imputed data)
+quarto render doc/cv.qmd               # Out-of-sample cross-validation
 quarto render doc/diagnostics.qmd      # Model diagnostics
 quarto render doc/missingness.qmd      # Missing data patterns
 quarto render doc/lpw_data_sources.qmd # LPW data sources

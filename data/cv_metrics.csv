@@ -1,0 +1,4 @@
+"model","oos_dev_r2","mae","rmse","mae_vote_wt","n_precincts","oos_design","generated_at","git_sha"
+"M1 baseline (dem_share * recent_lpw)",0.569085286779796,0.0785478208718179,0.100476369995539,0.0737133500636284,3432,"leave-one-locale-out","2026-07-17 23:39:56 UTC","319828a"
+"M2 + demographics",0.517081730600011,0.0868783112860722,0.110069708183865,0.0781138802459373,3432,"leave-one-locale-out","2026-07-17 23:39:56 UTC","319828a"
+"M3 GLMM (+ demographics)",0.237530095179238,0.107262909696162,0.129501604770825,0.104970494758043,3432,"leave-one-locale-out","2026-07-17 23:39:56 UTC","319828a"

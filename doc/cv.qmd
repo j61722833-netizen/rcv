@@ -1,0 +1,224 @@
+---
+title: "Out-of-Sample Cross-Validation of the RCV Support Models"
+author: "Jesse Brandt"
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(tidyr)
+library(RColorBrewer)
+
+load("../data/cv_results.RData")   # cv_results (from R/05_cv.R)
+
+metrics      <- cv_results$metrics
+fold_metrics <- cv_results$fold_metrics
+fold_mean    <- cv_results$fold_mean
+imp_spread   <- cv_results$imp_spread
+prov         <- cv_results$provenance
+
+# convenience: a named getter for headline numbers used in prose
+m1 <- metrics[1, ]; m2 <- metrics[2, ]; m3 <- metrics[3, ]
+pp <- function(x) sprintf("%.1f", 100 * x)   # proportion -> percentage-point string
+```
+
+## Why this report exists
+
+The models in `04_models.R` report an in-sample adjusted pseudo-R² of **0.86**
+(baseline) and **0.83** (+ demographics). Those numbers measure fit to the *same*
+precincts the models were trained on. They cannot tell a reader how well the model
+would predict RCV support in a **jurisdiction it has never seen** — which is the
+only claim worth putting on a résumé. This report replaces the in-sample number
+with a genuinely out-of-sample one.
+
+> **Headline:** under leave-one-locale-out cross-validation, the baseline model
+> `dem_share * recent_lpw` predicts a held-out jurisdiction's precinct-level RCV
+> support with a mean absolute error of **`r pp(m1$mae)` percentage points**
+> (out-of-sample deviance-R² = **`r sprintf("%+.2f", m1$oos_dev_r2)`**), pooling
+> across `r prov$m_imputations` imputations. Every number below is out-of-sample.
+
+## Design decisions
+
+**Grouping: leave-one-locale-out (LOLO), `r prov$n_folds` folds.**
+Precincts are nested within `r prov$n_folds` locales, and locale drives almost
+everything — the outcome, the key regressor `recent_lpw` (a locale-level
+constant), and M3's random intercept. A naive random precinct split would let the
+model learn each locale's mean from its own training precincts and then "predict"
+its held-out precincts, leaking exactly the cluster structure we want to test
+across. Each fold therefore holds out one **entire** locale and predicts it from
+the other seven. This is the correct — and deliberately harsh — test of
+generalisation to a new jurisdiction. It can honestly produce a **negative**
+deviance-R² when a model does worse than a training-mean intercept.
+
+Only Alaska and Maine have `recent_lpw = TRUE`, so LOLO keeps `recent_lpw`
+identified in every fold (holding out one leaves the other). Holding out Alaska or
+Maine is thus a direct out-of-sample test of the paper's central LPW hypothesis:
+*does the LPW shift estimated from Maine alone actually predict Alaska, and vice
+versa?*
+
+**Imputation under CV (leakage-aware).**
+
+- **M1** uses only `dem_share * recent_lpw` — no demographics, so **no imputation**.
+  Its CV is fully leakage-free. This is the cleanest headline number.
+- **M2 / M3** use six Census demographics with missing values. The `mice`
+  imputation model is **refit inside each training fold** via mice's `ignore=`
+  argument: the held-out locale's rows are imputed but never contribute to
+  estimating the imputation model, so no held-out information leaks into the
+  imputed predictors. *Documented compromise:* under LOLO the held-out locale is
+  an unseen factor level, so we drop `locale` from the imputation predictors
+  (03_imputation.R used it) and impute demographics from `dem_share`,
+  `recent_lpw`, and the other demographics. Held-out imputation therefore regresses
+  toward training patterns — the honest reality of predicting a new jurisdiction's
+  missing demographics.
+
+**Metrics** (appropriate to a quasibinomial / proportion outcome):
+
+- **OOS deviance-explained** — `1 − Σ deviance(model) / Σ deviance(null)`, null =
+  each fold's training-set overall support rate, pooled over all held-out
+  precincts. The out-of-sample analog of the in-sample pseudo-R².
+- **MAE / RMSE** of the predicted support share (percentage points), precinct-level
+  and vote-weighted.
+
+All metrics pool across the `r prov$m_imputations` imputations by averaging the
+predicted probabilities per precinct, then scoring once.
+
+## Pooled out-of-sample results
+
+```{r pooled-table}
+metrics %>%
+  transmute(
+    Model = model,
+    `OOS dev-R²` = round(oos_dev_r2, 3),
+    `MAE (pp)`   = round(100 * mae, 2),
+    `RMSE (pp)`  = round(100 * rmse, 2),
+    `Vote-wt MAE (pp)` = round(100 * mae_vote_wt, 2),
+    `N held-out precincts` = n_precincts
+  ) %>%
+  kable(caption = paste0("Leave-one-locale-out metrics, pooled across ",
+                         prov$m_imputations, " imputations. Every precinct scored ",
+                         "only when its locale was held out.")) %>%
+  kable_styling(full_width = FALSE)
+```
+
+Two ways of averaging tell slightly different stories: **precinct-pooled** (above,
+dominated by the large Massachusetts and Alaska folds) versus **fold-mean** (each
+of the `r prov$n_folds` locales weighted equally, so the tiny cities count as much
+as Massachusetts).
+
+```{r pooled-vs-foldmean}
+metrics %>%
+  select(model, oos_dev_r2, mae) %>%
+  left_join(
+    fold_mean %>%
+      mutate(model = metrics$model[match(model, c("M1","M2","M3"))]),
+    by = "model"
+  ) %>%
+  transmute(
+    Model = model,
+    `Dev-R² (precinct-pooled)` = round(oos_dev_r2, 3),
+    `Dev-R² (fold-mean)`       = round(dev_r2_fold_mean, 3),
+    `MAE pp (precinct-pooled)` = round(100 * mae, 2),
+    `MAE pp (fold-mean)`       = round(100 * mae_fold_mean, 2)
+  ) %>%
+  kable(caption = "Precinct-pooled vs equal-weight-per-locale.") %>%
+  kable_styling(full_width = FALSE)
+```
+
+## Per-held-out-locale detail
+
+Which jurisdictions are hard to predict from the others? This is the table that
+makes the LOLO test concrete.
+
+```{r fold-table}
+fold_metrics %>%
+  filter(model == "M1") %>%
+  transmute(
+    `Held-out locale` = locale,
+    `N precincts` = n_precincts,
+    `OOS dev-R²` = round(oos_dev_r2, 3),
+    `MAE (pp)`   = round(100 * mae, 2),
+    `Mean observed support` = round(mean_obs, 3),
+    `Mean predicted`        = round(mean_pred, 3)
+  ) %>%
+  kable(caption = "M1 baseline, one row per held-out locale.") %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r fold-plot, fig.width=8, fig.height=5}
+plot_df <- fold_metrics %>%
+  mutate(model = recode(model, M1 = "M1 baseline",
+                        M2 = "M2 + demographics", M3 = "M3 GLMM"))
+
+ggplot(plot_df, aes(x = reorder(locale, mae), y = 100 * mae, fill = model)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.75) +
+  scale_fill_brewer(palette = "Dark2", name = NULL) +
+  coord_flip() +
+  labs(
+    title = "Out-of-sample error by held-out locale",
+    subtitle = "Mean absolute error of predicted RCV support share, leave-one-locale-out",
+    x = NULL, y = "MAE (percentage points)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "top")
+```
+
+```{r calib-plot, fig.width=7, fig.height=5.5}
+# Observed vs predicted support, held-out precincts (M1), coloured by locale.
+cal <- cv_results$pooled_preds$M1
+ggplot(cal, aes(x = p, y = obs, color = locale)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
+  geom_point(alpha = 0.35, size = 0.9) +
+  scale_color_brewer(palette = "Set2", name = "Held-out locale") +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(
+    title = "Held-out calibration (M1 baseline)",
+    subtitle = "Each point is a precinct predicted while its locale was held out",
+    x = "Predicted RCV support", y = "Observed RCV support"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+## Imputation uncertainty
+
+For M2 / M3, how much does the choice of imputation move the headline numbers?
+Small spread means the out-of-sample conclusion is not an artifact of any single
+imputation.
+
+```{r imp-spread}
+imp_spread %>%
+  transmute(
+    Model = model,
+    `Dev-R² mean` = round(dev_r2_mean, 3),
+    `Dev-R² SD`   = round(dev_r2_sd, 3),
+    `MAE mean (pp)` = round(100 * mae_mean, 2),
+    `MAE SD (pp)`   = round(100 * mae_sd, 2),
+    `Imputations` = m
+  ) %>%
+  kable(caption = paste0("Spread of headline metrics across the ",
+                         prov$m_imputations,
+                         " individual imputations (M1 has none).")) %>%
+  kable_styling(full_width = FALSE)
+```
+
+## How to cite these numbers
+
+```{r provenance}
+tibble(
+  Field = c("CV design", "Folds", "Precincts", "Imputations", "Null model",
+            "Pooling", "Generated", "R", "mice", "git"),
+  Value = c(prov$cv_design, prov$n_folds, prov$n_precincts, prov$m_imputations,
+            prov$null_model, prov$pooling, prov$generated_at, prov$r_version,
+            prov$mice_version, prov$git_sha)
+) %>%
+  kable(caption = "Provenance of the numbers in this report.") %>%
+  kable_styling(full_width = FALSE)
+```
+
+Numbers are persisted to `data/cv_results.RData`, `data/cv_metrics.csv`, and
+`data/cv_fold_metrics.csv`, regenerated by `R/05_cv.R`.
