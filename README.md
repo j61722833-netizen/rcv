@@ -19,7 +19,7 @@ Precinct-level analysis of voter support for Ranked-Choice Voting (RCV) ballot m
 
 ## Data Pipeline
 
-The pipeline has five stages, each in `R/`:
+The pipeline has six stages, each in `R/`:
 
 ### 0. `R/00_download.R` — Download LPW source datasets
 
