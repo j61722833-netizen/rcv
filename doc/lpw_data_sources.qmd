@@ -11,34 +11,35 @@ execute:
 
 The `recent_lpw` variable flags whether a locale's state had a statewide race
 (governor or U.S. senator) won with less than 40% of the vote within 10 years
-of the RCV ballot measure. The two cases in this study:
+prior to the RCV ballot measure. The two cases in this study:
 
 - **Maine**: Governor Paul LePage won in 2010 with 37.6%
   ([Ballotpedia](https://ballotpedia.org/Maine_gubernatorial_election,_2010))
 - **Alaska**: Senator Lisa Murkowski won in 2010 with 39.7% (write-in)
   ([Ballotpedia](https://ballotpedia.org/Lisa_Murkowski))
 
-The current project uses a hand-built CSV
-(`data/raw/statewide_elections_lpw_2006_2018.csv`) covering the 6 states in
-the dataset. This is sufficient for the current scope.
+The winner-share table behind `recent_lpw` is **derived programmatically**
+from downloadable returns (fetched by `R/00_download.R`, derived in the
+`recent_lpw` section of `R/01_clean_and_merge.R`):
+
+| Races | Source |
+|---|---|
+| U.S. Senate, all 6 states | MEDSL U.S. Senate 1976--2020 (statewide totals) |
+| Governor, 5 county states | Amlani & Algara county returns 1865--2020, summed to state |
+| Governor, Alaska 2014 & 2018 | Official AK statewide summaries (Internet Archive) |
+| Governor, Alaska 2010 | Hand-entered (`statewide_elections_manual.csv`) — no machine-readable source exists |
+
+An earlier version of this project used a fully hand-extracted table
+(`data/raw/statewide_elections_lpw_2006_2018.csv`, copied from Ballotpedia and
+Wikipedia). That file is retained only as a cross-check: the pipeline stops if
+the derived LPW classification ever disagrees with it.
 
 ## U.S. Senate returns (MEDSL)
-
-For reference, a consolidated U.S. Senate general election returns file
-(1976--2020) from the MIT Election Data + Science Lab has been downloaded.
 
 - **Citation**: MIT Election Data and Science Lab, 2017, "U.S. Senate 1976--2020",
   <https://doi.org/10.7910/DVN/PEJ5QU>, Harvard Dataverse
 - **File**: `data/raw/medsl_senate_1976_2020.csv`
-- **Download**: Harvard Dataverse API, file ID 7609736
-
-```{r download-senate, eval=FALSE}
-download.file(
-  url = "https://dataverse.harvard.edu/api/access/datafile/7609736?format=original",
-  destfile = "data/raw/medsl_senate_1976_2020.csv",
-  mode = "wb"
-)
-```
+- **Download**: Harvard Dataverse API, file ID 7609736 (see `R/00_download.R`)
 
 ### Senate races won with < 40% (2006+)
 
@@ -64,9 +65,97 @@ Alaska 2010 appears at 35.6% — this is Joe Miller's plurality among
 non-write-in candidates. Murkowski's write-in share was 39.7%. Either way,
 no candidate cleared 40%, confirming the LPW classification.
 
-## Future research
+## Governor returns (Amlani & Algara)
 
-MEDSL does not publish a consolidated governor returns file. If expanding to
-new locales, governor races would need to be checked manually (e.g. from
-Ballotpedia) or scraped. Low-plurality governors are rare; for the current
-8-locale dataset the hand-built CSV is sufficient.
+MEDSL does not publish a consolidated governor returns file, but a
+county-level gubernatorial returns dataset covering 1865--2020 is available
+on Harvard Dataverse and aggregates cleanly to statewide totals.
+
+- **Citation**: Amlani, Sharif; Algara, Carlos, 2021, Replication Data for
+  "Partisanship & Nationalization in American Elections: Evidence from
+  Presidential, Senatorial, & Gubernatorial Elections in the U.S. Counties,
+  1872--2020" (*Electoral Studies*),
+  <https://doi.org/10.7910/DVN/DGUMFI>, Harvard Dataverse
+- **File**: `data/raw/gubernatorial_county_returns_1865_2020.RData`
+  (loads as `gov_elections_release`)
+- **Download**: Harvard Dataverse API, file ID 5028535 (see `R/00_download.R`)
+
+Two limitations, both handled in the pipeline:
+
+1. **Alaska is absent** — the state has no counties. Alaska governor races
+   come from official Division of Elections files instead (next section).
+2. Only Democratic and Republican raw votes are itemized (plus an
+   all-candidate total), so winner share is computed as `max(D, R) / total`.
+   This is correct whenever the winner was a D or R — true for every governor
+   race in the five county states during the study window. Independent
+   *losers* (e.g. Cutler, Maine 2010) are in the denominator and only shrink
+   the computed winner share, the conservative direction for a < 40% flag.
+
+```{r governor-shares}
+load("../data/raw/gubernatorial_county_returns_1865_2020.RData")
+
+state_po_map <- c(CA = "California", CO = "Colorado", ME = "Maine",
+                  MA = "Massachusetts", MN = "Minnesota")
+
+gov_winners <- gov_elections_release %>%
+  filter(state %in% names(state_po_map), election_year >= 2006) %>%
+  group_by(state, election_year) %>%
+  summarise(dem = sum(democratic_raw_votes, na.rm = TRUE),
+            rep = sum(republican_raw_votes, na.rm = TRUE),
+            total = sum(raw_county_vote_totals, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(winner_share = round(100 * pmax(dem, rep) / total, 1))
+
+gov_winners %>%
+  select(state, election_year, winner_share) %>%
+  arrange(state, election_year) %>%
+  knitr::kable(caption = "Governor winner shares, study states (2006+)")
+```
+
+Maine 2006 (38.1%) and 2010 (38.1%) are the only sub-40% governor races —
+matching the hand-extracted table (38.11% and 37.6%; the small 2010
+difference reflects a different vote-total base, on the same side of 40%).
+
+## Alaska governor races
+
+The Alaska Division of Elections publishes machine-readable statewide results
+summaries, but the live site now sits behind a CAPTCHA, so `R/00_download.R`
+fetches the Internet Archive's captures of the official `results.txt` files:
+
+- **2014**: `data/raw/alaska_statewide_results_2014.txt`
+  (Walker/Mallott, an independent ticket, won with 48.1% — a case the
+  two-party county dataset could not have handled)
+- **2018**: `data/raw/alaska_statewide_results_2018.txt`
+  (Dunleavy won with 51.4%)
+
+**2010 is the one race with no machine-readable source anywhere.** The
+official 2010 results file — in every archived form (txt, htm, pdf) — contains
+only the U.S. Senate race (the Miller/Murkowski write-in count), and
+OpenElections' Alaska coverage starts in 2014. The official record for the
+rest of the 2010 ballot is the set of per-district SOVC PDFs. This single row
+(Parnell, R, 59.06% — far above the 40% threshold) is hand-entered in
+`data/raw/statewide_elections_manual.csv` with its source documented inline.
+
+## Cross-check against the hand-extracted table
+
+```{r cross-check}
+hand <- read.csv("../data/raw/statewide_elections_lpw_2006_2018.csv",
+                 fileEncoding = "UTF-8-BOM")
+
+hand %>%
+  filter(Winner.Share.... < 40) %>%
+  select(State, Year, Office, Winner.Share....) %>%
+  knitr::kable(caption = "Hand-extracted table: races won with < 40%")
+```
+
+Both the derived table and the hand-extracted table classify exactly
+**Maine and Alaska** as LPW states. `R/01_clean_and_merge.R` asserts this
+agreement with `stopifnot()` on every run.
+
+## Expanding to new locales
+
+Adding a state now requires no hand extraction for any senate race
+(MEDSL, through 2020) or any governor race in a county state (Amlani &
+Algara, through 2020). Newer races would need the successor MEDSL releases
+or state sources; genuinely unsourceable races go in
+`statewide_elections_manual.csv` with a documented source.

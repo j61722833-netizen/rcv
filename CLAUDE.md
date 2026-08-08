@@ -20,6 +20,7 @@ rcv/
 ├── rcv.Rproj              # RStudio project file
 ├── CLAUDE.md              # This file
 ├── R/
+│   ├── 00_download.R          # Fetch LPW source datasets (Dataverse, Internet Archive)
 │   ├── 01_clean_and_merge.R   # Clean raw data, merge locales → states_and_cities
 │   ├── 02_census_api.R        # Enrich with Census demographics (PL94-171 + ACS)
 │   ├── 03_imputation.R        # Multiple imputation of missing demographics (mice)
@@ -45,6 +46,7 @@ rcv/
 Run scripts sequentially from the project root:
 
 ```r
+source("R/00_download.R")         # → data/raw/ LPW source files (skips existing; all committed)
 source("R/01_clean_and_merge.R")  # → data/rcv_data.RData, data/states_and_cities.csv
 source("R/02_census_api.R")       # → data/rcv_data_census.RData (needs CENSUS_API_KEY)
 source("R/03_imputation.R")       # → data/rcv_data_imputed.RData, data/rcv_data_mids.RData
@@ -52,9 +54,13 @@ source("R/04_models.R")           # → data/model_results.RData
 source("R/05_cv.R")               # → data/cv_results.RData, data/cv_metrics.csv
 ```
 
+### 00: Download LPW sources (`R/00_download.R`)
+
+Fetches the datasets behind the `recent_lpw` variable: MEDSL U.S. Senate 1976–2020 and Amlani & Algara county-level gubernatorial returns 1865–2020 (both Harvard Dataverse), plus archived official Alaska statewide results summaries (Internet Archive; the live elections.alaska.gov is behind a CAPTCHA). Skips files already present; all downloads are committed, so the rest of the pipeline runs offline.
+
 ### 01: Clean and merge (`R/01_clean_and_merge.R`)
 
-Reads raw data from `data/raw/`, cleans and merges all locales into the `states_and_cities` dataframe.
+Reads raw data from `data/raw/`, cleans and merges all locales into the `states_and_cities` dataframe. Derives the LPW winner-share table from the downloaded returns (only Alaska Governor 2010 is hand-entered, in `data/raw/statewide_elections_manual.csv`) and cross-checks the classification against the legacy hand-extracted CSV with `stopifnot()`. See `doc/lpw_data_sources.qmd` for sources and citations.
 
 Locales processed:
 - **Alaska 2020** — Ballot Measure No. 2 + U.S. President

@@ -8,7 +8,7 @@ Precinct-level analysis of voter support for Ranked-Choice Voting (RCV) ballot m
 
 | Locale          | Year | Level     | RCV Measure          | N precincts |
 | --------------- | ---- | --------- | -------------------- | ----------- |
-| Alaska          | 2020 | Statewide | Ballot Measure No. 2 | 580         |
+| Alaska          | 2020 | Statewide | Ballot Measure No. 2 | 579         |
 | Massachusetts   | 2020 | Statewide | Question 2           | 2,173       |
 | Maine           | 2016 | Statewide | Question 5           | 536         |
 | Albany, CA      | 2020 | City      | Measure BB           | 3           |
@@ -19,11 +19,15 @@ Precinct-level analysis of voter support for Ranked-Choice Voting (RCV) ballot m
 
 ## Data Pipeline
 
-The pipeline has four stages, each in `R/`:
+The pipeline has five stages, each in `R/`:
+
+### 0. `R/00_download.R` — Download LPW source datasets
+
+Fetches the statewide election returns behind the "Low Plurality Winner" variable: MEDSL U.S. Senate 1976–2020 and Amlani & Algara county-level gubernatorial returns 1865–2020 (both via the Harvard Dataverse API), plus archived official Alaska statewide results summaries (Internet Archive). All downloads are committed to `data/raw/`, so this stage is optional for reproduction. Sources and citations: `doc/lpw_data_sources.qmd`.
 
 ### 1. `R/01_clean_and_merge.R` — Clean and merge election data
 
-Reads raw precinct-level election results from `data/raw/`, cleans and merges all 8 locales into a single dataframe (`states_and_cities`). Core output columns:
+Reads raw precinct-level election results from `data/raw/`, cleans and merges all 8 locales into a single dataframe (`states_and_cities`). Derives `recent_lpw` (any statewide race won with <40% in the 10 years before the RCV measure) from the downloaded returns — only Alaska Governor 2010 is hand-entered — and cross-checks the classification against the legacy hand-extracted table. Core output columns:
 
 ### 2. `R/02_census_api.R` — Add Census demographics
 
@@ -57,7 +61,7 @@ Evaluates the models with **leave-one-locale-out** cross-validation: each of the
 
 | File                          | Description                                              |
 | ----------------------------- | -------------------------------------------------------- |
-| `data/rcv_data.RData`         | Base election data (3,446 precincts)                     |
+| `data/rcv_data.RData`         | Base election data (3,445 precincts)                     |
 | `data/rcv_data_census.RData`  | + Census demographics (observed only)                    |
 | `data/rcv_data_imputed.RData` | + Imputed demographics (single completed dataset)        |
 | `data/rcv_data_mids.RData`    | `mice` mids object (5 imputations, for pooled inference) |
@@ -104,6 +108,7 @@ To reproduce the analysis from scratch:
 3. Run the pipeline:
 
 ```bash
+Rscript R/00_download.R   # optional — downloads are committed
 Rscript R/01_clean_and_merge.R
 Rscript R/02_census_api.R
 Rscript R/03_imputation.R
