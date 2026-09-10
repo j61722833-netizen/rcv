@@ -665,16 +665,106 @@ states_and_cities <- states_and_cities %>%
 # (Albany, Eureka, Bloomington, Minnetonka, Boulder) inherit the LPW status
 # of their state based on statewide election history — not because those
 # states had statewide RCV measures (they did not in this dataset).
+#
+# The winner-share table is derived from downloaded returns (R/00_download.R):
+#   Senate            — MEDSL U.S. Senate 1976-2020, statewide totals
+#   Governor          — Amlani & Algara county returns 1865-2020, aggregated
+#                       to statewide (all study states except Alaska, which
+#                       has no counties)
+#   Alaska Governor   — official AK statewide summaries (2014, 2018; archived)
+#                       plus one hand-entered row (2010) with no
+#                       machine-readable source anywhere
+# The formerly hand-extracted table (statewide_elections_lpw_2006_2018.csv)
+# is kept only as a cross-check at the end of this section.
 # ============================================================================
 
-swe <- read.csv("data/raw/statewide_elections_lpw_2006_2018.csv", fileEncoding = "UTF-8-BOM") %>%
-  rename(swe_state = State, winner_share = Winner.Share....) %>%
-  select(-any_of(c("X", "X.1", "X.2", "X.3", "X.4")))  # drop trailing empty columns from CSV exporter
+measure_year <- c(Alaska = 2020, California = 2020, Colorado = 2020,
+                  Maine = 2016, Massachusetts = 2020, Minnesota = 2020)
+state_po_map <- c(AK = "Alaska", CA = "California", CO = "Colorado",
+                  ME = "Maine", MA = "Massachusetts", MN = "Minnesota")
+
+# Senate: winner share among counted (non-write-in) candidates.
+# NOTE (Alaska 2010): Murkowski won as a write-in with 39.7%; the top counted
+# candidate (Miller, R) had 35.5%. Both are < 40, so the LPW flag is the same
+# whichever share is used.
+sen_shares <- read.csv("data/raw/medsl_senate_1976_2020.csv") %>%
+  filter(stage == "gen", writein == "False", state_po %in% names(state_po_map)) %>%
+  group_by(year, state_po, totalvotes) %>%
+  summarise(winner_votes = max(candidatevotes), .groups = "drop") %>%
+  transmute(swe_state = unname(state_po_map[state_po]), year,
+            office = "Senator",
+            winner_share = 100 * winner_votes / totalvotes)
+
+# Governor (all study states except Alaska): county returns summed to state.
+# The source carries raw votes for the Democratic and Republican nominees plus
+# an all-candidate total, so winner share = max(D, R) / total. This assumes
+# the winner was a D or R — true for every governor race in these five states
+# 2006-2018 (independent *losers* like Cutler in Maine 2010 only shrink the
+# winner's share, which is the conservative direction for the < 40% flag).
+load("data/raw/gubernatorial_county_returns_1865_2020.RData")  # gov_elections_release
+gov_shares <- gov_elections_release %>%
+  filter(state %in% names(state_po_map), election_year >= 2006) %>%
+  group_by(state, election_year) %>%
+  summarise(dem = sum(democratic_raw_votes, na.rm = TRUE),
+            rep = sum(republican_raw_votes, na.rm = TRUE),
+            total = sum(raw_county_vote_totals, na.rm = TRUE),
+            .groups = "drop") %>%
+  transmute(swe_state = unname(state_po_map[state]), year = election_year,
+            office = "Governor",
+            winner_share = 100 * pmax(dem, rep) / total)
+
+# Alaska governor races: official statewide summary files (same format as the
+# precinct files parsed above: race, choice, party, "Total", votes). Winner
+# share uses all listed candidates including write-ins as the denominator,
+# matching the official "Total Votes" line. Correctly handles the 2014
+# independent winner (Walker/Mallott), which the county dataset could not.
+read_ak_gov_share <- function(path) {
+  # Parse only the governor lines: some legislative-district rows in these
+  # files have unbalanced quotes that corrupt a whole-file read.csv()
+  gov_lines <- grep('^"GOVERNOR', readLines(path, encoding = "latin1"), value = TRUE)
+  read.csv(text = gov_lines, header = FALSE,
+           col.names = c("race", "choice", "party", "total_label", "votes", "V6")) %>%
+    mutate(choice = trimws(choice)) %>%
+    filter(!choice %in% c("Number of Precincts for Race",
+                          "Number of Precincts Reporting",
+                          "Registered Voters", "Times Counted")) %>%
+    summarise(winner_share = 100 * max(votes) / sum(votes)) %>%
+    pull(winner_share)
+}
+
+ak_gov_shares <- data.frame(
+  swe_state = "Alaska", year = c(2014, 2018), office = "Governor",
+  winner_share = c(read_ak_gov_share("data/raw/alaska_statewide_results_2014.txt"),
+                   read_ak_gov_share("data/raw/alaska_statewide_results_2018.txt"))
+)
+
+# Rows with no machine-readable source (currently Alaska Governor 2010 only)
+manual_shares <- read.csv("data/raw/statewide_elections_manual.csv") %>%
+  transmute(swe_state = state, year, office, winner_share)
+
+# Combine and restrict to each state's 10-year window before its RCV measure
+swe <- bind_rows(sen_shares, gov_shares, ak_gov_shares, manual_shares) %>%
+  filter(year >= measure_year[swe_state] - 10,
+         year < measure_year[swe_state])
+
+stopifnot(setequal(unique(swe$swe_state), names(measure_year)))
 
 lpw_states <- swe %>%
   filter(winner_share < 40) %>%
   pull(swe_state) %>%
   unique()
+
+# Cross-check the derived classification against the original hand-extracted
+# table (kept for provenance; no longer load-bearing)
+hand_lpw_states <- read.csv("data/raw/statewide_elections_lpw_2006_2018.csv",
+                            fileEncoding = "UTF-8-BOM") %>%
+  filter(Winner.Share.... < 40) %>%
+  pull(State) %>%
+  unique()
+stopifnot(setequal(lpw_states, hand_lpw_states))
+cat("recent_lpw derived from downloaded returns; LPW states:",
+    paste(sort(lpw_states), collapse = ", "),
+    "(matches hand-extracted cross-check)\n")
 
 states_and_cities <- states_and_cities %>%
   mutate(recent_lpw = state %in% lpw_states)
